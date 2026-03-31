@@ -262,6 +262,7 @@
     <div class="stat-chip critical" onclick="setRiskFilter('high')">Risky: <span class="num" id="statRisky">-</span></div>
     <div class="stat-chip circular" onclick="setRiskFilter('circular')">Circular: <span class="num" id="statCircular">-</span></div>
     <div class="stat-chip" style="background:#d2992220;color:#d29922;cursor:pointer;" onclick="showDefaultSgWarnings()">Default SG: <span class="num" id="statDefault">-</span></div>
+    <div class="stat-chip" style="background:#da882020;color:#da8820;cursor:pointer;" onclick="showGovernanceWarnings()">Governance: <span class="num" id="statGovernance">-</span></div>
 </div>
 
 <!-- Main Layout -->
@@ -444,6 +445,7 @@ function updateStats(stats) {
         document.getElementById('statRisky').textContent = stats.risky_sgs;
         document.getElementById('statCircular').textContent = stats.circular_sgs;
         document.getElementById('statDefault').textContent = stats.default_sg_warnings;
+        document.getElementById('statGovernance').textContent = stats.governance_warnings || 0;
     } else if (findings) {
         // Fallback to unfiltered findings
         const s = findings.summary;
@@ -453,6 +455,7 @@ function updateStats(stats) {
         document.getElementById('statRisky').textContent = findings.risky_rules.length;
         document.getElementById('statCircular').textContent = findings.circular_references.length;
         document.getElementById('statDefault').textContent = (findings.default_sg_warnings || []).length;
+        document.getElementById('statGovernance').textContent = (findings.governance_warnings || []).length;
     }
 }
 
@@ -958,6 +961,34 @@ async function showSgDetail(sgId) {
             html += `</div>`;
         }
 
+        // Governance warnings
+        if (sg.governance_warnings && sg.governance_warnings.length > 0) {
+            const sevIcons = { critical: '🔴', high: '🟠', medium: '🟡' };
+            html += `<div class="panel-section" style="background:#da882010;">
+                <div class="panel-section-title" style="color:#da8820;">📋 거버넌스 경고</div>`;
+            for (const w of sg.governance_warnings) {
+                html += `<div class="rule-card" style="border-color:#da8820;">
+                    <div class="rule-header">
+                        <span>${sevIcons[w.severity] || '⚪'} ${E(w.warning_type)}</span>
+                        <span class="risk-badge ${w.severity}" style="font-size:10px;">${E(w.severity)}</span>
+                    </div>
+                    <div style="font-size:11px;color:#8b949e;">${E(w.detail)}</div>
+                </div>`;
+            }
+            html += `</div>`;
+        }
+
+        // Governance tags
+        const govTags = (sg.tags || []).filter(t => t.Key && t.Value);
+        if (govTags.length > 0) {
+            html += `<div class="panel-section">
+                <div class="panel-section-title">🏷️ Tags</div>`;
+            for (const t of govTags) {
+                html += `<div class="detail-row"><span class="detail-label">${E(t.Key)}</span><span class="detail-value">${E(t.Value)}</span></div>`;
+            }
+            html += `</div>`;
+        }
+
         // Inbound rules
         html += `<div class="panel-section">
             <div class="panel-section-title">Ingress Rules (인바운드) ${sg.inbound_rules.length}개</div>`;
@@ -1073,6 +1104,58 @@ function showDefaultSgWarnings() {
                 html += `<div class="rule-source">${isDanger ? '⚠️ ' : ''}${src}</div>`;
             }
             html += '</div>';
+        }
+        html += '</div>';
+    }
+
+    content.innerHTML = html;
+}
+
+function showGovernanceWarnings() {
+    if (!findings || !findings.governance_warnings || findings.governance_warnings.length === 0) {
+        alert('거버넌스 경고가 없습니다.');
+        return;
+    }
+
+    const panel = document.getElementById('sidePanel');
+    const content = document.getElementById('panelContent');
+    panel.classList.remove('collapsed');
+    document.getElementById('panelTitle').textContent = 'Governance 경고';
+
+    const typeLabels = {
+        missing_tag: '태그 누락',
+        overdue_review: '검토 기한 초과',
+        expired: '만료됨',
+        expiring_soon: '곧 만료',
+    };
+    const sevIcons = { critical: '🔴', high: '🟠', medium: '🟡' };
+
+    // Group by type
+    const grouped = {};
+    for (const w of findings.governance_warnings) {
+        const t = w.warning_type;
+        if (!grouped[t]) grouped[t] = [];
+        grouped[t].push(w);
+    }
+
+    let html = `<div class="panel-section" style="background:#da882010;">
+        <div class="panel-section-title" style="color:#da8820;">📋 ISMS 거버넌스 태그 점검 결과</div>
+        <div style="font-size:11px;color:#8b949e;margin-bottom:8px;">
+            config.json 또는 환경변수로 태그 이름과 규칙을 설정할 수 있습니다.
+        </div>
+    </div>`;
+
+    for (const [type, items] of Object.entries(grouped)) {
+        html += `<div class="panel-section">
+            <div class="panel-section-title">${typeLabels[type] || type} (${items.length}개)</div>`;
+        for (const w of items) {
+            html += `<div class="rule-card" style="cursor:pointer;" onclick="showSgDetail('${w.sg_id}')">
+                <div class="rule-header">
+                    <span>${sevIcons[w.severity] || '⚪'} ${w.sg_name}</span>
+                    <span class="risk-badge ${w.severity}" style="font-size:10px;">${w.severity}</span>
+                </div>
+                <div style="font-size:11px;color:#8b949e;">${w.sg_id} · ${w.detail}</div>
+            </div>`;
         }
         html += '</div>';
     }

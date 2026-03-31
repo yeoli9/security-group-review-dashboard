@@ -12,13 +12,17 @@ from flask_cors import CORS
 
 from collector import collect_all
 from analyzer import analyze
+from governance import load_config as load_governance_config
 
-app = Flask(__name__, static_folder="static")
+_APP_DIR = Path(__file__).parent
+_PROJECT_DIR = _APP_DIR.parent
+
+app = Flask(__name__, static_folder=str(_APP_DIR / "static"))
 CORS(app)
 
 # Multi-account cache: { account_id: { data, findings } }
 _accounts = {}
-CACHE_FILE = "sg_data_cache.json"
+CACHE_FILE = str(_PROJECT_DIR / "sg_data_cache.json")
 
 
 @app.route("/")
@@ -133,7 +137,8 @@ def api_collect():
         profile_key = profile or "default"
         try:
             data = collect_all(profile_name=profile, region_name=region)
-            findings = analyze(data)
+            gov_config = load_governance_config()
+            findings = analyze(data, governance_config=gov_config)
             data["profile"] = profile_key
             _accounts[profile_key] = {"data": data, "findings": findings}
             all_errors = data.get("collection_errors", [])
@@ -351,6 +356,14 @@ def api_graph():
         default_warnings.extend(acct["findings"].get("default_sg_warnings", []))
     stats["default_sg_warnings"] = len(default_warnings)
 
+    # Count governance warnings from filtered accounts
+    gov_warnings = []
+    for profile_key, acct in _accounts.items():
+        if acct_filter and profile_key != acct_filter:
+            continue
+        gov_warnings.extend(acct["findings"].get("governance_warnings", []))
+    stats["governance_warnings"] = len(gov_warnings)
+
     return jsonify({"nodes": unique_nodes, "edges": valid_edges, "vpcs": vpc_meta, "stats": stats})
 
 
@@ -367,8 +380,16 @@ def api_sg_detail(sg_id):
                 sg_copy["account_id"] = acct["data"].get("account_id", "")
                 risky = [r for r in acct["findings"].get("risky_rules", []) if r["sg_id"] == sg_id]
                 sg_copy["risky_rules"] = risky
+                gov = [w for w in acct["findings"].get("governance_warnings", []) if w["sg_id"] == sg_id]
+                sg_copy["governance_warnings"] = gov
                 return jsonify(sg_copy)
     return jsonify({"status": "not_found"}), 404
+
+
+@app.route("/api/governance-config")
+def api_governance_config():
+    """Return resolved governance config."""
+    return jsonify(load_governance_config())
 
 
 @app.route("/api/export/unused")
@@ -426,10 +447,10 @@ def _merge_data(acct_filter=None):
 
 def _merge_findings(acct_filter=None):
     """Merge findings from all (or filtered) profiles."""
-    merged = {"unused_sgs": [], "default_sg_warnings": [], "risky_rules": [], "circular_references": [], "redundant_rules": [], "summary": {
+    merged = {"unused_sgs": [], "default_sg_warnings": [], "risky_rules": [], "circular_references": [], "redundant_rules": [], "governance_warnings": [], "summary": {
         "total_sgs": 0, "used_sgs": 0, "unused_sgs": 0,
         "total_inbound_rules": 0, "total_outbound_rules": 0, "vpc_sg_counts": {},
-        "default_sg_warnings": 0,
+        "default_sg_warnings": 0, "governance_warnings": 0,
     }}
     for profile_key, acct in _accounts.items():
         if acct_filter and profile_key != acct_filter:
@@ -440,6 +461,7 @@ def _merge_findings(acct_filter=None):
         merged["risky_rules"].extend(f.get("risky_rules", []))
         merged["circular_references"].extend(f.get("circular_references", []))
         merged["redundant_rules"].extend(f.get("redundant_rules", []))
+        merged["governance_warnings"].extend(f.get("governance_warnings", []))
         s = f.get("summary", {})
         merged["summary"]["total_sgs"] += s.get("total_sgs", 0)
         merged["summary"]["used_sgs"] += s.get("used_sgs", 0)
@@ -447,6 +469,7 @@ def _merge_findings(acct_filter=None):
         merged["summary"]["total_inbound_rules"] += s.get("total_inbound_rules", 0)
         merged["summary"]["total_outbound_rules"] += s.get("total_outbound_rules", 0)
         merged["summary"]["default_sg_warnings"] += s.get("default_sg_warnings", 0)
+        merged["summary"]["governance_warnings"] += s.get("governance_warnings", 0)
         for vpc_id, cnt in s.get("vpc_sg_counts", {}).items():
             merged["summary"]["vpc_sg_counts"][vpc_id] = merged["summary"]["vpc_sg_counts"].get(vpc_id, 0) + cnt
     return merged

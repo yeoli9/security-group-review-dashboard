@@ -18,6 +18,7 @@ ISMS 보안 검토를 위한 AWS Security Group 시각화 대시보드.
 - **테이블 뷰** — 정렬 가능한 SG 목록 테이블 (그래프/테이블 전환)
 - **멀티 계정** — `~/.aws/config` 프로파일 자동 감지, 동일 계정 중복 제거
 - **필터링** — Profile, VPC, Risk Level, 검색어, 미사용 숨김
+- **거버넌스 점검** — 태그 기반 ISMS 거버넌스 (담당자, 검토일, 만료일, 사유 등)
 - **내보내기** — 미사용 SG 목록 JSON/CSV 다운로드
 
 ## 스크린샷
@@ -75,6 +76,55 @@ http://localhost:5000 접속 후 **Collect** 버튼으로 데이터를 수집합
 4. SG 노드 또는 테이블 행 클릭 → 상세 패널에서 규칙/리소스 확인
 5. 미사용 SG는 JSON/CSV로 내보내기
 
+## 거버넌스 태그 설정
+
+ISMS 점검을 위해 SG에 부착된 AWS 태그를 기반으로 거버넌스 준수 여부를 검사합니다.
+
+`config.json`에서 태그 이름과 규칙을 설정합니다. (`./run.sh` → Configure 메뉴로도 편집 가능)
+
+```json
+{
+  "governance_tags": {
+    "owner": "Owner",
+    "project": "Project",
+    "environment": "Environment",
+    "reviewed_at": "ReviewedAt",
+    "expires_at": "ExpiresAt",
+    "justification": "Justification",
+    "risk_accepted": "RiskAccepted",
+    "approved_by": "ApprovedBy"
+  },
+  "governance_rules": {
+    "required_tags": ["owner", "justification"],
+    "review_interval_days": 90,
+    "warn_expiry_days_before": 14
+  }
+}
+```
+
+| 키 | 기본 태그명 | 설명 |
+|----|------------|------|
+| `owner` | `Owner` | 담당자/팀 |
+| `project` | `Project` | 프로젝트/서비스명 |
+| `environment` | `Environment` | prod/staging/dev |
+| `reviewed_at` | `ReviewedAt` | 마지막 검토일 (YYYY-MM-DD) |
+| `expires_at` | `ExpiresAt` | 만료일 (YYYY-MM-DD) |
+| `justification` | `Justification` | SG 존재 사유 |
+| `risk_accepted` | `RiskAccepted` | 리스크 수용 여부 |
+| `approved_by` | `ApprovedBy` | 승인자 |
+
+환경변수로 태그 이름을 오버라이드할 수 있습니다:
+
+```bash
+SG_TAG_OWNER=ResourceOwner SG_TAG_REVIEWED_AT=LastAuditDate python server.py
+```
+
+### 검사 항목
+
+- **필수 태그 누락** — `required_tags`에 지정된 태그가 SG에 없으면 경고
+- **검토 기한 초과** — `ReviewedAt` 태그 기준 `review_interval_days`일 초과 시 경고
+- **만료/만료 임박** — `ExpiresAt` 태그 기준 만료 또는 `warn_expiry_days_before`일 이내 시 경고
+
 ## 필요 IAM 권한
 
 Read-only 권한만 사용합니다. (Write API 없음)
@@ -125,15 +175,18 @@ Read-only 권한만 사용합니다. (Write API 없음)
 ## 프로젝트 구조
 
 ```
-├── server.py             # Flask API 서버
-├── collector.py          # AWS 데이터 수집 (23개 리소스 타입)
-├── analyzer.py           # SG 분석 (미사용, 위험규칙, 순환참조, 중복규칙)
+├── app/
+│   ├── server.py         # Flask API 서버
+│   ├── collector.py      # AWS 데이터 수집 (23개 리소스 타입)
+│   ├── analyzer.py       # SG 분석 (미사용, 위험규칙, 순환참조, 거버넌스)
+│   ├── governance.py     # 거버넌스 태그 설정 로더
+│   └── static/
+│       └── index.html    # 대시보드 프론트엔드 (Cytoscape.js)
+├── config.json           # 거버넌스 태그/규칙 설정
 ├── requirements.txt      # Python 의존성
 ├── run.sh                # 인터랙티브 실행 스크립트
 ├── Dockerfile            # Docker 이미지 빌드
 ├── docker-compose.yml    # Docker Compose 설정
-├── static/
-│   └── index.html        # 대시보드 프론트엔드 (Cytoscape.js)
 └── docs/
     ├── PLAN.md           # 기획서
     └── PROGRESS.md       # 진행 내역

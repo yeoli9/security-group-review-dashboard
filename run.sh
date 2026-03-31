@@ -14,8 +14,8 @@ BG_BLUE='\033[44m'
 WHITE='\033[97m'
 
 # ─── Menu items ───
-TITLES=("Local Setup + Run" "Local Run" "Docker Compose" "Docker Compose Down" "Clean")
-DESCS=("Python venv 세팅 후 서버 실행" "이미 세팅된 venv로 서버 실행" "Docker로 빌드 + 실행" "Docker 컨테이너 종료" "venv, 캐시 등 전부 삭제")
+TITLES=("Local Setup + Run" "Local Run" "Docker Compose" "Docker Compose Down" "Configure" "Clean")
+DESCS=("Python venv 세팅 후 서버 실행" "이미 세팅된 venv로 서버 실행" "Docker로 빌드 + 실행" "Docker 컨테이너 종료" "거버넌스 태그 설정 편집" "venv, 캐시 등 전부 삭제")
 
 SELECTED=0
 TOTAL=${#TITLES[@]}
@@ -83,7 +83,7 @@ action_setup_and_run() {
   echo -e ""
   echo -e "  ${BOLD}${GREEN}→ http://localhost:5000${RESET}"
   echo -e ""
-  .venv/bin/python server.py
+  .venv/bin/python app/server.py
 }
 
 action_run() {
@@ -97,7 +97,7 @@ action_run() {
   echo -e ""
   echo -e "  ${BOLD}${GREEN}→ http://localhost:5000${RESET}"
   echo -e ""
-  .venv/bin/python server.py
+  .venv/bin/python app/server.py
 }
 
 action_docker_up() {
@@ -116,6 +116,39 @@ action_docker_down() {
   echo -e "  ${GREEN}종료 완료.${RESET}"
 }
 
+action_configure() {
+  CONFIG_FILE="config.json"
+  if [[ ! -f "$CONFIG_FILE" ]]; then
+    echo -e "  ${CYAN}기본 설정 파일을 생성합니다...${RESET}"
+    cat > "$CONFIG_FILE" << 'DEFAULTEOF'
+{
+  "governance_tags": {
+    "owner": "Owner",
+    "project": "Project",
+    "environment": "Environment",
+    "reviewed_at": "ReviewedAt",
+    "expires_at": "ExpiresAt",
+    "justification": "Justification",
+    "risk_accepted": "RiskAccepted",
+    "approved_by": "ApprovedBy"
+  },
+  "governance_rules": {
+    "required_tags": ["owner", "justification"],
+    "review_interval_days": 90,
+    "warn_expiry_days_before": 14
+  }
+}
+DEFAULTEOF
+  fi
+  EDITOR=${EDITOR:-${VISUAL:-vi}}
+  echo -e "  ${CYAN}${EDITOR}로 설정 파일을 엽니다.${RESET}"
+  $EDITOR "$CONFIG_FILE"
+  echo -e ""
+  echo -e "  ${GREEN}설정이 저장되었습니다.${RESET}"
+  echo -e "  ${DIM}환경변수로도 오버라이드 가능합니다:${RESET}"
+  echo -e "  ${DIM}  SG_TAG_OWNER=ResourceOwner ./run.sh${RESET}"
+}
+
 action_clean() {
   echo -e "  ${YELLOW}정리 중...${RESET}"
   rm -rf .venv __pycache__ sg_data_cache.json
@@ -129,7 +162,8 @@ run_action() {
     1) action_run ;;
     2) action_docker_up ;;
     3) action_docker_down ;;
-    4) action_clean ;;
+    4) action_configure ;;
+    5) action_clean ;;
   esac
 }
 

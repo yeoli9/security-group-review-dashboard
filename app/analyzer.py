@@ -1,10 +1,14 @@
-"""Security Group analysis - unused SGs, risky rules, circular references."""
+"""Security Group analysis - unused SGs, risky rules, circular references, governance."""
+
+from datetime import date, timedelta
 
 
-def analyze(data):
+def analyze(data, governance_config=None):
     """Analyze collected SG data and return findings."""
     sgs = data["security_groups"]
     sg_map = {sg["id"]: sg for sg in sgs}
+
+    governance_warnings = find_governance_warnings(sgs, governance_config) if governance_config else []
 
     findings = {
         "unused_sgs": find_unused_sgs(sgs),
@@ -12,7 +16,8 @@ def analyze(data):
         "risky_rules": find_risky_rules(sgs),
         "circular_references": find_circular_references(sgs, sg_map),
         "redundant_rules": find_redundant_rules(sgs),
-        "summary": build_summary(sgs),
+        "governance_warnings": governance_warnings,
+        "summary": build_summary(sgs, governance_warnings),
     }
 
     # Attach findings to each SG
@@ -238,7 +243,83 @@ def _is_subset_rule(narrow, broad):
     return False
 
 
-def build_summary(sgs):
+def find_governance_warnings(sgs, config):
+    """Check SGs for governance tag compliance."""
+    if not config:
+        return []
+
+    tag_map = config["governance_tags"]
+    rules = config["governance_rules"]
+    required = rules.get("required_tags", [])
+    review_days = rules.get("review_interval_days", 90)
+    expiry_warn_days = rules.get("warn_expiry_days_before", 14)
+    today = date.today()
+
+    warnings = []
+
+    for sg in sgs:
+        tags = {t["Key"]: t["Value"] for t in sg.get("tags", [])}
+        sg_base = {"sg_id": sg["id"], "sg_name": sg["name"], "vpc_id": sg["vpc_id"], "is_used": sg["is_used"]}
+
+        # Missing required tags
+        for req_key in required:
+            aws_tag = tag_map.get(req_key)
+            if aws_tag and aws_tag not in tags:
+                severity = "high" if sg["is_used"] else "medium"
+                warnings.append({
+                    **sg_base,
+                    "warning_type": "missing_tag",
+                    "severity": severity,
+                    "tag_name": req_key,
+                    "detail": f"필수 태그 '{aws_tag}' 누락",
+                })
+
+        # Overdue review
+        review_tag = tag_map.get("reviewed_at")
+        if review_tag and review_tag in tags:
+            try:
+                reviewed = date.fromisoformat(tags[review_tag])
+                overdue_days = (today - reviewed).days - review_days
+                if overdue_days > 0:
+                    warnings.append({
+                        **sg_base,
+                        "warning_type": "overdue_review",
+                        "severity": "high",
+                        "tag_name": "reviewed_at",
+                        "detail": f"마지막 검토일({tags[review_tag]})로부터 {overdue_days}일 초과",
+                    })
+            except ValueError:
+                pass
+
+        # Expired / expiring soon
+        expiry_tag = tag_map.get("expires_at")
+        if expiry_tag and expiry_tag in tags:
+            try:
+                expires = date.fromisoformat(tags[expiry_tag])
+                if expires < today:
+                    warnings.append({
+                        **sg_base,
+                        "warning_type": "expired",
+                        "severity": "critical",
+                        "tag_name": "expires_at",
+                        "detail": f"만료됨 ({tags[expiry_tag]})",
+                    })
+                elif expires <= today + timedelta(days=expiry_warn_days):
+                    remaining = (expires - today).days
+                    warnings.append({
+                        **sg_base,
+                        "warning_type": "expiring_soon",
+                        "severity": "medium",
+                        "tag_name": "expires_at",
+                        "detail": f"{remaining}일 후 만료 ({tags[expiry_tag]})",
+                    })
+            except ValueError:
+                pass
+
+    return warnings
+
+
+def build_summary(sgs, governance_warnings=None):
     total = len(sgs)
     used = sum(1 for sg in sgs if sg["is_used"])
     unused = total - used
@@ -263,6 +344,7 @@ def build_summary(sgs):
         "total_outbound_rules": total_outbound,
         "vpc_sg_counts": vpc_counts,
         "default_sg_warnings": default_with_rules,
+        "governance_warnings": len(governance_warnings) if governance_warnings else 0,
     }
 
 

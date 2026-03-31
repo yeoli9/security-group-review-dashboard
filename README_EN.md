@@ -18,6 +18,7 @@ Identify unused SGs, overly permissive rules, and circular references at a glanc
 - **Table view** — Sortable SG list table (graph/table toggle)
 - **Multi-account** — Auto-detect profiles from `~/.aws/config`, deduplicate same accounts
 - **Filtering** — Profile, VPC, Risk Level, search, hide unused
+- **Governance checks** — Tag-based ISMS governance (owner, review date, expiry, justification, etc.)
 - **Export** — Download unused SG list as JSON/CSV
 
 ## Screenshot
@@ -75,6 +76,55 @@ Open http://localhost:5000 and click **Collect** to start gathering data.
 4. Click an SG node or table row → View rules, resources, and risks in the detail panel
 5. Export unused SGs as JSON/CSV
 
+## Governance Tag Configuration
+
+Checks governance compliance based on AWS tags attached to Security Groups, designed for ISMS audits.
+
+Edit `config.json` to configure tag names and rules. (Also editable via `./run.sh` → Configure)
+
+```json
+{
+  "governance_tags": {
+    "owner": "Owner",
+    "project": "Project",
+    "environment": "Environment",
+    "reviewed_at": "ReviewedAt",
+    "expires_at": "ExpiresAt",
+    "justification": "Justification",
+    "risk_accepted": "RiskAccepted",
+    "approved_by": "ApprovedBy"
+  },
+  "governance_rules": {
+    "required_tags": ["owner", "justification"],
+    "review_interval_days": 90,
+    "warn_expiry_days_before": 14
+  }
+}
+```
+
+| Key | Default Tag | Description |
+|-----|------------|-------------|
+| `owner` | `Owner` | Owner / team |
+| `project` | `Project` | Project or service name |
+| `environment` | `Environment` | prod / staging / dev |
+| `reviewed_at` | `ReviewedAt` | Last review date (YYYY-MM-DD) |
+| `expires_at` | `ExpiresAt` | Expiration date (YYYY-MM-DD) |
+| `justification` | `Justification` | Reason for the SG |
+| `risk_accepted` | `RiskAccepted` | Risk acceptance flag |
+| `approved_by` | `ApprovedBy` | Approver |
+
+Override tag names with environment variables:
+
+```bash
+SG_TAG_OWNER=ResourceOwner SG_TAG_REVIEWED_AT=LastAuditDate python server.py
+```
+
+### Checks Performed
+
+- **Missing required tags** — warns if tags in `required_tags` are absent from an SG
+- **Overdue review** — warns if `ReviewedAt` exceeds `review_interval_days`
+- **Expired / expiring soon** — warns if `ExpiresAt` is past or within `warn_expiry_days_before`
+
 ## Required IAM Permissions
 
 Only read-only permissions are used. (No write APIs)
@@ -125,15 +175,18 @@ Only read-only permissions are used. (No write APIs)
 ## Project Structure
 
 ```
-├── server.py             # Flask API server
-├── collector.py          # AWS data collection (23 resource types)
-├── analyzer.py           # SG analysis (unused, risky rules, circular refs, redundant rules)
+├── app/
+│   ├── server.py         # Flask API server
+│   ├── collector.py      # AWS data collection (23 resource types)
+│   ├── analyzer.py       # SG analysis (unused, risky rules, circular refs, governance)
+│   ├── governance.py     # Governance tag config loader
+│   └── static/
+│       └── index.html    # Dashboard frontend (Cytoscape.js)
+├── config.json           # Governance tag/rule settings
 ├── requirements.txt      # Python dependencies
 ├── run.sh                # Interactive launch script
 ├── Dockerfile            # Docker image build
 ├── docker-compose.yml    # Docker Compose config
-├── static/
-│   └── index.html        # Dashboard frontend (Cytoscape.js)
 └── docs/
     ├── PLAN.md           # Project spec
     └── PROGRESS.md       # Progress log

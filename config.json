@@ -1,0 +1,17 @@
+{
+  "governance_tags": {
+    "owner": "Owner",
+    "project": "Project",
+    "environment": "Environment",
+    "reviewed_at": "ReviewedAt",
+    "expires_at": "ExpiresAt",
+    "justification": "Justification",
+    "risk_accepted": "RiskAccepted",
+    "approved_by": "ApprovedBy"
+  },
+  "governance_rules": {
+    "required_tags": ["owner", "justification"],
+    "review_interval_days": 90,
+    "warn_expiry_days_before": 14
+  }
+}
