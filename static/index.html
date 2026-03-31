@@ -210,13 +210,13 @@
 
         /* Resource toggle notice */
         .perf-notice {
-            position: absolute; top: 8px; right: 8px; z-index: 10;
-            background: #161b22ee; border: 1px solid #30363d; border-radius: 6px;
-            padding: 6px 12px; font-size: 11px; color: #8b949e; display: none;
+            position: absolute; top: 8px; left: 8px; z-index: 10;
+            background: #1f6feb20; border: 1px solid #1f6feb80; border-radius: 6px;
+            padding: 8px 14px; font-size: 11px; color: #58a6ff; display: none;
             gap: 8px; align-items: center;
         }
         .perf-notice.active { display: flex; }
-        .perf-notice .btn { height: 22px; padding: 2px 8px; font-size: 10px; }
+        .perf-notice .btn { height: 24px; padding: 3px 10px; font-size: 10px; background: #1f6feb; border-color: #1f6feb; color: #fff; }
     </style>
 </head>
 <body>
@@ -771,7 +771,7 @@ function renderGraph(graphData) {
     const totalNodes = cy.nodes().length;
     const perfNotice = document.getElementById('perfNotice');
     resourceNodesHidden = false;
-    if (totalNodes > 200) {
+    if (totalNodes > 500) {
         resourceNodesHidden = true;
         cy.nodes().forEach(n => {
             if (n.data('type') !== 'sg') n.style('display', 'none');
