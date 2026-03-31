@@ -16,7 +16,15 @@ def analyze(data):
     }
 
     # Attach findings to each SG
-    risky_sg_ids = {r["sg_id"] for r in findings["risky_rules"]}
+    # Build per-SG max risk level from individual rules
+    sg_max_risk = {}  # sg_id -> "critical" | "high" | "medium"
+    for r in findings["risky_rules"]:
+        cur = sg_max_risk.get(r["sg_id"], "")
+        rule_level = r["risk_level"]
+        if _risk_order(rule_level) < _risk_order(cur):
+            sg_max_risk[r["sg_id"]] = rule_level
+
+    risky_sg_ids = set(sg_max_risk.keys())
     circular_sg_ids = set()
     for cycle in findings["circular_references"]:
         circular_sg_ids.update(cycle)
@@ -24,7 +32,7 @@ def analyze(data):
     for sg in sgs:
         sg["has_risky_rules"] = sg["id"] in risky_sg_ids
         sg["in_circular_ref"] = sg["id"] in circular_sg_ids
-        sg["risk_level"] = _calc_risk_level(sg, risky_sg_ids, circular_sg_ids)
+        sg["risk_level"] = _calc_risk_level(sg, sg_max_risk, circular_sg_ids)
 
     return findings
 
@@ -258,11 +266,15 @@ def build_summary(sgs):
     }
 
 
-def _calc_risk_level(sg, risky_sg_ids, circular_sg_ids):
+def _risk_order(level):
+    return {"critical": 0, "high": 1, "medium": 2, "low": 3, "": 99}.get(level, 99)
+
+
+def _calc_risk_level(sg, sg_max_risk, circular_sg_ids):
     if not sg["is_used"]:
         return "unused"
-    if sg["id"] in risky_sg_ids:
-        return "high"
+    if sg["id"] in sg_max_risk:
+        return sg_max_risk[sg["id"]]  # "critical", "high", or "medium"
     if sg["id"] in circular_sg_ids:
         return "medium"
     return "low"

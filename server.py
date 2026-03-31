@@ -243,9 +243,12 @@ def api_graph():
         if not sg["is_used"]:
             node_class = "unused"
 
-        # Risk filter
-        if risk_filter and risk_filter != node_class:
-            continue
+        # Risk filter: "high" includes both critical and high
+        if risk_filter:
+            if risk_filter == "high" and node_class not in ("critical", "high"):
+                continue
+            elif risk_filter != "high" and risk_filter != node_class:
+                continue
 
         sg_ids_in_graph.add(sg["id"])
         vpc_ids_used.add(sg["vpc_id"])
@@ -317,7 +320,28 @@ def api_graph():
     # Only include edges where both source and target exist
     valid_edges = [e for e in edges if e["data"]["source"] in seen_ids and e["data"]["target"] in seen_ids]
 
-    return jsonify({"nodes": unique_nodes, "edges": valid_edges, "vpcs": vpc_meta})
+    # Build stats from the filtered SG set (not from findings)
+    sg_nodes = [n for n in unique_nodes if n["data"].get("type") == "sg"]
+    risky_sgs = [n for n in sg_nodes if n["data"].get("nodeClass") in ("high", "critical")]
+    unused_sgs = [n for n in sg_nodes if n["data"].get("nodeClass") == "unused"]
+    medium_sgs = [n for n in sg_nodes if n["data"].get("nodeClass") == "medium"]
+    stats = {
+        "total_sgs": len(sg_nodes),
+        "used_sgs": len(sg_nodes) - len(unused_sgs),
+        "unused_sgs": len(unused_sgs),
+        "risky_sgs": len(risky_sgs),
+        "circular_sgs": len(medium_sgs),
+    }
+
+    # Count default SG warnings from filtered accounts
+    default_warnings = []
+    for profile_key, acct in _accounts.items():
+        if acct_filter and profile_key != acct_filter:
+            continue
+        default_warnings.extend(acct["findings"].get("default_sg_warnings", []))
+    stats["default_sg_warnings"] = len(default_warnings)
+
+    return jsonify({"nodes": unique_nodes, "edges": valid_edges, "vpcs": vpc_meta, "stats": stats})
 
 
 @app.route("/api/sg/<sg_id>")

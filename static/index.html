@@ -230,7 +230,7 @@
             <option value="">All Profiles</option>
         </select>
         <label>VPC</label>
-        <select id="vpcFilter" style="max-width:180px;"><option value="">All VPCs</option></select>
+        <select id="vpcFilter" style="max-width:180px;" onchange="refreshGraph()"><option value="">All VPCs</option></select>
         <label>Risk</label>
         <select id="riskFilter" style="max-width:100px;" onchange="refreshGraph()">
             <option value="">All</option>
@@ -240,7 +240,7 @@
             <option value="unused">Unused</option>
         </select>
         <input id="searchInput" type="text" placeholder="Search SG..." style="width:130px;">
-        <label><input type="checkbox" id="hideUnused"> Hide Unused</label>
+        <label><input type="checkbox" id="hideUnused" onchange="refreshGraph()"> Hide Unused</label>
         <button class="btn" onclick="refreshGraph()">Filter</button>
         <div class="view-toggle">
             <button class="btn active" id="btnGraphView" onclick="switchView('graph')">Graph</button>
@@ -433,15 +433,25 @@ function populateVpcFilter() {
     }
 }
 
-function updateStats() {
-    if (!findings) return;
-    const s = findings.summary;
-    document.getElementById('statTotal').textContent = s.total_sgs;
-    document.getElementById('statUsed').textContent = s.used_sgs;
-    document.getElementById('statUnused').textContent = s.unused_sgs;
-    document.getElementById('statRisky').textContent = findings.risky_rules.length;
-    document.getElementById('statCircular').textContent = findings.circular_references.length;
-    document.getElementById('statDefault').textContent = (findings.default_sg_warnings || []).length;
+function updateStats(stats) {
+    if (stats) {
+        // Use filtered stats from graph API
+        document.getElementById('statTotal').textContent = stats.total_sgs;
+        document.getElementById('statUsed').textContent = stats.used_sgs;
+        document.getElementById('statUnused').textContent = stats.unused_sgs;
+        document.getElementById('statRisky').textContent = stats.risky_sgs;
+        document.getElementById('statCircular').textContent = stats.circular_sgs;
+        document.getElementById('statDefault').textContent = stats.default_sg_warnings;
+    } else if (findings) {
+        // Fallback to unfiltered findings
+        const s = findings.summary;
+        document.getElementById('statTotal').textContent = s.total_sgs;
+        document.getElementById('statUsed').textContent = s.used_sgs;
+        document.getElementById('statUnused').textContent = s.unused_sgs;
+        document.getElementById('statRisky').textContent = findings.risky_rules.length;
+        document.getElementById('statCircular').textContent = findings.circular_references.length;
+        document.getElementById('statDefault').textContent = (findings.default_sg_warnings || []).length;
+    }
 }
 
 function setRiskFilter(value) {
@@ -477,6 +487,8 @@ async function refreshGraph() {
         lastGraphData = graphData;
         document.getElementById('emptyState').style.display =
             graphData.nodes.length === 0 ? 'flex' : 'none';
+        // Update stats from filtered graph data
+        if (graphData.stats) updateStats(graphData.stats);
         if (currentView === 'graph') {
             renderGraph(graphData);
         } else {
@@ -505,6 +517,9 @@ function renderGraph(graphData) {
             }},
             { selector: 'node[nodeClass="low"]', style: {
                 'background-color': '#1f6feb', 'border-color': '#58a6ff',
+            }},
+            { selector: 'node[nodeClass="critical"]', style: {
+                'background-color': '#8e1519', 'border-color': '#da3633', 'border-width': 3,
             }},
             { selector: 'node[nodeClass="high"]', style: {
                 'background-color': '#da3633', 'border-color': '#f85149',
