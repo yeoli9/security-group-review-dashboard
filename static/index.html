@@ -1,0 +1,1278 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Security Group Review Dashboard</title>
+    <script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f1117; color: #e1e4e8; overflow: hidden; height: 100vh; }
+
+        /* Top Bar */
+        .top-bar {
+            display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+            background: #161b22; border-bottom: 1px solid #30363d; height: 48px; flex-shrink: 0;
+        }
+        .top-bar .logo { font-size: 13px; font-weight: 700; color: #f0883e; white-space: nowrap; }
+        .top-bar .logo::before { content: "🛡️ "; }
+        .filter-group { display: flex; gap: 5px; align-items: center; flex-wrap: nowrap; overflow-x: auto; flex: 1; }
+        .filter-group label { font-size: 10px; color: #8b949e; white-space: nowrap; }
+        .filter-group select, .filter-group input {
+            background: #0d1117; border: 1px solid #30363d; color: #c9d1d9; border-radius: 6px;
+            padding: 4px 6px; font-size: 11px; height: 28px;
+        }
+        .filter-group select:focus, .filter-group input:focus { border-color: #58a6ff; outline: none; }
+        .btn {
+            padding: 4px 10px; border-radius: 6px; border: 1px solid #30363d; background: #21262d;
+            color: #c9d1d9; font-size: 11px; cursor: pointer; white-space: nowrap; height: 28px;
+        }
+        .btn:hover { background: #30363d; }
+        .btn-primary { background: #238636; border-color: #238636; color: #fff; }
+        .btn-primary:hover { background: #2ea043; }
+
+        /* Stats Bar */
+        .stats-bar {
+            display: flex; gap: 12px; padding: 6px 16px; background: #161b22;
+            border-bottom: 1px solid #30363d; flex-shrink: 0; flex-wrap: wrap;
+        }
+        .stat-chip {
+            display: flex; align-items: center; gap: 4px; padding: 2px 10px;
+            border-radius: 12px; font-size: 11px; font-weight: 600; cursor: pointer;
+        }
+        .stat-chip:hover { opacity: 0.8; }
+        .stat-chip.total { background: #1f6feb20; color: #58a6ff; }
+        .stat-chip.used { background: #23863620; color: #3fb950; }
+        .stat-chip.unused { background: #6e768120; color: #8b949e; }
+        .stat-chip.critical { background: #da363320; color: #f85149; }
+        .stat-chip.circular { background: #d29922; color: #0d1117; }
+        .stat-chip .num { font-size: 13px; }
+
+        /* Layout */
+        .main-layout { display: flex; height: calc(100vh - 48px - 36px); }
+        #cy { flex: 1; background: #0d1117; width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
+
+        /* Legend */
+        .legend {
+            position: absolute; bottom: 16px; left: 16px; background: #161b22ee;
+            border: 1px solid #30363d; border-radius: 8px; padding: 10px 14px; font-size: 11px; z-index: 10;
+        }
+        .legend-title { font-weight: 700; margin-bottom: 6px; color: #8b949e; }
+        .legend-item { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+        .legend-dot { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+        .legend-line { width: 20px; height: 2px; flex-shrink: 0; }
+        .legend-rect { width: 16px; height: 12px; border-radius: 3px; flex-shrink: 0; border: 2px dashed; }
+
+        /* Side Panel */
+        .side-panel {
+            width: 380px; background: #161b22; border-left: 1px solid #30363d;
+            overflow-y: auto; flex-shrink: 0; transition: width 0.2s;
+        }
+        .side-panel.collapsed { width: 0; overflow: hidden; }
+        .panel-header {
+            padding: 12px 16px; border-bottom: 1px solid #30363d;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .panel-header h3 { font-size: 14px; color: #f0883e; }
+        .panel-close { cursor: pointer; color: #8b949e; font-size: 18px; }
+        .panel-section { padding: 12px 16px; border-bottom: 1px solid #21262d; }
+        .panel-section-title {
+            font-size: 11px; font-weight: 700; color: #8b949e; text-transform: uppercase;
+            margin-bottom: 8px; display: flex; align-items: center; gap: 4px;
+        }
+        .panel-section-title::before { content: "▸ "; }
+        .detail-row { display: flex; justify-content: space-between; font-size: 12px; padding: 3px 0; }
+        .detail-label { color: #8b949e; }
+        .detail-value { color: #c9d1d9; font-family: monospace; }
+        .rule-card {
+            background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+            padding: 8px 10px; margin: 4px 0; font-size: 11px;
+        }
+        .rule-card .rule-header { display: flex; gap: 8px; margin-bottom: 4px; }
+        .rule-tag { padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; }
+        .rule-tag.protocol { background: #1f6feb30; color: #58a6ff; }
+        .rule-tag.port { background: #23863630; color: #3fb950; }
+        .rule-tag.danger { background: #da363330; color: #f85149; }
+        .rule-source { color: #8b949e; font-family: monospace; font-size: 11px; }
+        .resource-item {
+            display: flex; align-items: center; gap: 6px; padding: 4px 8px; margin: 2px 0;
+            background: #0d1117; border-radius: 4px; font-size: 11px; cursor: pointer;
+        }
+        .resource-item:hover { background: #21262d; }
+        .resource-badge {
+            padding: 1px 6px; border-radius: 3px; font-size: 9px; font-weight: 700;
+            text-transform: uppercase;
+        }
+        .resource-badge.ec2 { background: #f0883e30; color: #f0883e; }
+        .resource-badge.rds { background: #3fb95030; color: #3fb950; }
+        .resource-badge.alb, .resource-badge.nlb, .resource-badge.clb { background: #a371f730; color: #a371f7; }
+        .resource-badge.lambda { background: #f0883e30; color: #f0883e; }
+        .resource-badge.ecs { background: #58a6ff30; color: #58a6ff; }
+        .resource-badge.eni { background: #6e768130; color: #8b949e; }
+        .resource-badge.vpcendpoint { background: #d2992230; color: #d29922; }
+        .resource-badge.aurora { background: #3fb95030; color: #3fb950; }
+        .resource-badge.elasticache { background: #f8514930; color: #f85149; }
+        .resource-badge.redshift { background: #a371f730; color: #a371f7; }
+        .resource-badge.opensearch { background: #d2992230; color: #d29922; }
+        .resource-badge.eks { background: #58a6ff30; color: #58a6ff; }
+        .resource-badge.documentdb { background: #3fb95030; color: #3fb950; }
+        .resource-badge.msk { background: #f0883e30; color: #f0883e; }
+        .resource-badge.emr { background: #a371f730; color: #a371f7; }
+        .resource-badge.sagemaker { background: #79c0ff30; color: #79c0ff; }
+        .resource-badge.mwaa { background: #d2992230; color: #d29922; }
+        .resource-badge.dms { background: #8b949e30; color: #8b949e; }
+        .resource-badge.efs { background: #f0883e30; color: #f0883e; }
+        .resource-badge.dax { background: #f8514930; color: #f85149; }
+        .resource-badge.neptune { background: #58a6ff30; color: #58a6ff; }
+        .resource-badge.memorydb { background: #f8514930; color: #f85149; }
+        .risk-badge { padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; }
+        .risk-badge.critical { background: #da3633; color: #fff; }
+        .risk-badge.high { background: #f85149; color: #fff; }
+        .risk-badge.medium { background: #d29922; color: #0d1117; }
+        .risk-badge.low { background: #238636; color: #fff; }
+        .risk-badge.unused { background: #6e7681; color: #fff; }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.6); z-index: 100; display: none; align-items: center; justify-content: center;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal {
+            background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+            width: 540px; max-height: 80vh; overflow-y: auto; padding: 20px;
+        }
+        .modal h2 { font-size: 16px; margin-bottom: 16px; color: #f0883e; }
+        .modal .form-group { margin-bottom: 12px; }
+        .modal .form-group label { display: block; font-size: 12px; color: #8b949e; margin-bottom: 4px; }
+        .modal .form-group input, .modal .form-group select, .modal .form-group textarea {
+            width: 100%; background: #0d1117; border: 1px solid #30363d; color: #c9d1d9;
+            border-radius: 6px; padding: 8px 12px; font-size: 13px;
+        }
+        .modal .form-group textarea { resize: vertical; min-height: 60px; font-family: monospace; }
+        .modal .form-hint { font-size: 11px; color: #6e7681; margin-top: 4px; }
+        .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+
+        /* Loading */
+        .loading-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.7); z-index: 200; display: none;
+            align-items: center; justify-content: center; flex-direction: column;
+        }
+        .loading-overlay.active { display: flex; }
+        .spinner { width: 40px; height: 40px; border: 3px solid #30363d; border-top-color: #58a6ff; border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-text { margin-top: 12px; color: #8b949e; font-size: 13px; }
+
+        /* No data state */
+        .empty-state {
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            height: 100%; color: #8b949e; gap: 16px;
+        }
+        .empty-state .icon { font-size: 48px; }
+        .empty-state p { font-size: 14px; }
+
+        /* Tooltip */
+        .cy-tooltip {
+            position: absolute; background: #1c2128; border: 1px solid #30363d; border-radius: 6px;
+            padding: 8px 12px; font-size: 11px; z-index: 50; pointer-events: none; max-width: 300px;
+        }
+
+        /* View toggle */
+        .view-toggle { display: flex; gap: 0; }
+        .view-toggle .btn { border-radius: 0; border-right: none; }
+        .view-toggle .btn:first-child { border-radius: 6px 0 0 6px; }
+        .view-toggle .btn:last-child { border-radius: 0 6px 6px 0; border-right: 1px solid #30363d; }
+        .view-toggle .btn.active { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+
+        /* Table view */
+        .table-container {
+            flex: 1; overflow: auto; background: #0d1117; display: none;
+        }
+        .table-container.active { display: block; }
+        .sg-table {
+            width: 100%; border-collapse: collapse; font-size: 12px;
+        }
+        .sg-table th {
+            position: sticky; top: 0; background: #161b22; color: #8b949e; font-weight: 600;
+            padding: 8px 12px; text-align: left; border-bottom: 1px solid #30363d;
+            cursor: pointer; user-select: none; white-space: nowrap; font-size: 11px;
+        }
+        .sg-table th:hover { color: #c9d1d9; }
+        .sg-table th .sort-arrow { margin-left: 4px; font-size: 9px; }
+        .sg-table td {
+            padding: 6px 12px; border-bottom: 1px solid #21262d; color: #c9d1d9;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px;
+        }
+        .sg-table tr { cursor: pointer; }
+        .sg-table tr:hover { background: #161b22; }
+        .sg-table .mono { font-family: monospace; font-size: 11px; }
+
+        /* Resource toggle notice */
+        .perf-notice {
+            position: absolute; top: 8px; right: 8px; z-index: 10;
+            background: #161b22ee; border: 1px solid #30363d; border-radius: 6px;
+            padding: 6px 12px; font-size: 11px; color: #8b949e; display: none;
+            gap: 8px; align-items: center;
+        }
+        .perf-notice.active { display: flex; }
+        .perf-notice .btn { height: 22px; padding: 2px 8px; font-size: 10px; }
+    </style>
+</head>
+<body>
+
+<!-- Top Bar -->
+<div class="top-bar">
+    <span class="logo">SG Review</span>
+    <div class="filter-group">
+        <label>Profile</label>
+        <select id="profileFilter" style="max-width:160px;" onchange="onProfileChange()">
+            <option value="">All Profiles</option>
+        </select>
+        <label>VPC</label>
+        <select id="vpcFilter" style="max-width:180px;"><option value="">All VPCs</option></select>
+        <label>Risk</label>
+        <select id="riskFilter" style="max-width:100px;" onchange="refreshGraph()">
+            <option value="">All</option>
+            <option value="high">Critical/High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+            <option value="unused">Unused</option>
+        </select>
+        <input id="searchInput" type="text" placeholder="Search SG..." style="width:130px;">
+        <label><input type="checkbox" id="hideUnused"> Hide Unused</label>
+        <button class="btn" onclick="refreshGraph()">Filter</button>
+        <div class="view-toggle">
+            <button class="btn active" id="btnGraphView" onclick="switchView('graph')">Graph</button>
+            <button class="btn" id="btnTableView" onclick="switchView('table')">Table</button>
+        </div>
+        <button class="btn btn-primary" onclick="showCollectModal()">Collect</button>
+        <button class="btn" onclick="exportUnused('json')">JSON</button>
+        <button class="btn" onclick="exportUnused('csv')">CSV</button>
+    </div>
+</div>
+
+<!-- Stats Bar -->
+<div class="stats-bar" id="statsBar">
+    <div class="stat-chip total" onclick="setRiskFilter('')">Total SG: <span class="num" id="statTotal">-</span></div>
+    <div class="stat-chip used" onclick="setRiskFilter('low')">Used: <span class="num" id="statUsed">-</span></div>
+    <div class="stat-chip unused" onclick="setRiskFilter('unused')">Unused: <span class="num" id="statUnused">-</span></div>
+    <div class="stat-chip critical" onclick="setRiskFilter('high')">Risky: <span class="num" id="statRisky">-</span></div>
+    <div class="stat-chip circular">Circular: <span class="num" id="statCircular">-</span></div>
+    <div class="stat-chip" style="background:#d2992220;color:#d29922;cursor:pointer;" onclick="showDefaultSgWarnings()">Default SG: <span class="num" id="statDefault">-</span></div>
+</div>
+
+<!-- Main Layout -->
+<div class="main-layout">
+    <div style="position:relative;flex:1;overflow:hidden;min-width:0;" id="graphContainer">
+        <div id="cy"></div>
+        <div class="empty-state" id="emptyState" style="position:absolute;top:0;left:0;width:100%;height:100%;z-index:5;">
+            <div class="icon">🛡️</div>
+            <p>데이터가 없습니다. "Collect"를 클릭하여 AWS에서 보안그룹을 수집하세요.</p>
+        </div>
+        <div class="perf-notice" id="perfNotice">
+            <span>노드가 많아 리소스 노드를 숨겼습니다.</span>
+            <button class="btn" onclick="toggleResourceNodes()">리소스 표시</button>
+        </div>
+        <!-- Legend -->
+        <div class="legend">
+            <div class="legend-title">범례</div>
+            <div class="legend-item"><div class="legend-rect" style="border-color:#30363d;background:#21262d40;"></div> VPC 경계</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#58a6ff;border-radius:50%;"></div> SG (정상)</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#f85149;border-radius:50%;"></div> SG (위험)</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#6e7681;border-radius:50%;"></div> SG (미사용)</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#f0883e;border-radius:6px;"></div> EC2</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#3fb950;border-radius:6px;"></div> RDS / Aurora</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#a371f7;border-radius:6px;"></div> Load Balancer</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#d29922;border-radius:6px;"></div> VPC Endpoint</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#79c0ff;border-radius:6px;"></div> Lambda / ECS</div>
+            <div class="legend-item"><div class="legend-line" style="background:#58a6ff;"></div> SG 참조</div>
+            <div class="legend-item"><div class="legend-line" style="background:#6e7681;"></div> 리소스 연결</div>
+        </div>
+    </div>
+
+    <!-- Table View -->
+    <div class="table-container" id="tableContainer">
+        <table class="sg-table" id="sgTable">
+            <thead>
+                <tr>
+                    <th data-col="name" onclick="sortTable('name')">Name <span class="sort-arrow"></span></th>
+                    <th data-col="id" onclick="sortTable('id')">SG ID <span class="sort-arrow"></span></th>
+                    <th data-col="vpc_id" onclick="sortTable('vpc_id')">VPC <span class="sort-arrow"></span></th>
+                    <th data-col="risk_level" onclick="sortTable('risk_level')">Risk <span class="sort-arrow"></span></th>
+                    <th data-col="resource_count" onclick="sortTable('resource_count')">Resources <span class="sort-arrow"></span></th>
+                    <th data-col="inbound" onclick="sortTable('inbound')">Inbound <span class="sort-arrow"></span></th>
+                    <th data-col="outbound" onclick="sortTable('outbound')">Outbound <span class="sort-arrow"></span></th>
+                    <th data-col="description" onclick="sortTable('description')">Description <span class="sort-arrow"></span></th>
+                </tr>
+            </thead>
+            <tbody id="sgTableBody"></tbody>
+        </table>
+    </div>
+
+    <!-- Side Panel -->
+    <div class="side-panel collapsed" id="sidePanel">
+        <div class="panel-header">
+            <h3 id="panelTitle">Security Group 정보</h3>
+            <span class="panel-close" onclick="closePanel()">✕</span>
+        </div>
+        <div id="panelContent"></div>
+    </div>
+</div>
+
+<!-- Collect Modal (Multi-Profile) -->
+<div class="modal-overlay" id="collectModal">
+    <div class="modal">
+        <h2>🔄 AWS 데이터 수집</h2>
+        <div class="form-group">
+            <label>AWS Profiles</label>
+            <div style="display:flex;gap:6px;margin-bottom:6px;">
+                <button class="btn" onclick="selectAllProfiles(true)" style="font-size:10px;padding:2px 8px;height:24px;">전체 선택</button>
+                <button class="btn" onclick="selectAllProfiles(false)" style="font-size:10px;padding:2px 8px;height:24px;">전체 해제</button>
+            </div>
+            <div id="profileList" style="max-height:200px;overflow-y:auto;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:8px;">
+                <div style="color:#6e7681;font-size:12px;">Loading profiles...</div>
+            </div>
+        </div>
+        <div class="form-group">
+            <label>Region</label>
+            <input id="awsRegion" type="text" placeholder="ap-northeast-2" value="ap-northeast-2">
+        </div>
+        <div class="modal-actions">
+            <button class="btn" onclick="closeCollectModal()">Cancel</button>
+            <button class="btn btn-primary" onclick="collectData()">수집 시작</button>
+        </div>
+    </div>
+</div>
+
+<!-- Loading -->
+<div class="loading-overlay" id="loadingOverlay">
+    <div class="spinner"></div>
+    <div class="loading-text" id="loadingText">AWS에서 데이터를 수집 중입니다...</div>
+</div>
+
+<!-- Tooltip -->
+<div class="cy-tooltip" id="tooltip" style="display:none;"></div>
+
+<script>
+let cy = null;
+let allData = null;
+let findings = null;
+let currentView = 'graph';
+let resourceNodesHidden = false;
+let lastGraphData = null;
+let tableSortCol = 'risk_level';
+let tableSortAsc = true;
+
+let graphVpcs = {}; // VPC metadata from server
+
+const VPC_COLORS = [
+    { bg: '#1f6feb10', border: '#1f6feb40' },
+    { bg: '#23863610', border: '#23863640' },
+    { bg: '#a371f710', border: '#a371f740' },
+    { bg: '#f0883e10', border: '#f0883e40' },
+    { bg: '#d2992210', border: '#d2992240' },
+    { bg: '#f8514910', border: '#f8514940' },
+    { bg: '#79c0ff10', border: '#79c0ff40' },
+    { bg: '#8b949e10', border: '#8b949e40' },
+];
+
+document.addEventListener('DOMContentLoaded', async () => {
+    await loadCachedData();
+});
+
+async function loadCachedData() {
+    const acct = document.getElementById('profileFilter').value;
+    const acctParam = acct ? `?profile=${acct}` : '';
+    try {
+        const [dataResp, findingsResp, accountsResp] = await Promise.all([
+            fetch('/api/data' + acctParam),
+            fetch('/api/findings' + acctParam),
+            fetch('/api/accounts'),
+        ]);
+        if (accountsResp.ok) {
+            const accounts = await accountsResp.json();
+            populateProfileFilter(accounts);
+        }
+        if (dataResp.ok && findingsResp.ok) {
+            allData = await dataResp.json();
+            findings = await findingsResp.json();
+            populateVpcFilter();
+            updateStats();
+            await refreshGraph();
+        }
+    } catch (e) {
+        console.log('No cached data:', e);
+    }
+}
+
+function populateProfileFilter(accounts) {
+    const sel = document.getElementById('profileFilter');
+    const current = sel.value;
+    sel.innerHTML = '<option value="">All Profiles</option>';
+    for (const a of accounts) {
+        const label = `${a.profile} (${a.account_id})`;
+        sel.innerHTML += `<option value="${a.profile}">${label}</option>`;
+    }
+    sel.value = current;
+}
+
+function onProfileChange() {
+    loadCachedData();
+}
+
+function populateVpcFilter() {
+    if (!allData) return;
+    const sel = document.getElementById('vpcFilter');
+    sel.innerHTML = '<option value="">All VPCs</option>';
+    const vpcs = allData.vpcs || {};
+    for (const [id, vpc] of Object.entries(vpcs)) {
+        const shortId = id.replace('vpc-', '').slice(0, 8);
+        const label = vpc.name ? `${vpc.name} (${shortId})` : id;
+        sel.innerHTML += `<option value="${id}">${label}</option>`;
+    }
+}
+
+function updateStats() {
+    if (!findings) return;
+    const s = findings.summary;
+    document.getElementById('statTotal').textContent = s.total_sgs;
+    document.getElementById('statUsed').textContent = s.used_sgs;
+    document.getElementById('statUnused').textContent = s.unused_sgs;
+    document.getElementById('statRisky').textContent = findings.risky_rules.length;
+    document.getElementById('statCircular').textContent = findings.circular_references.length;
+    document.getElementById('statDefault').textContent = (findings.default_sg_warnings || []).length;
+}
+
+function setRiskFilter(value) {
+    document.getElementById('riskFilter').value = value;
+    refreshGraph();
+}
+
+async function refreshGraph() {
+    const acct = document.getElementById('profileFilter').value;
+    const vpc = document.getElementById('vpcFilter').value;
+    const search = document.getElementById('searchInput').value;
+    const hideUnused = document.getElementById('hideUnused').checked;
+    const risk = document.getElementById('riskFilter').value;
+
+    let url = `/api/graph?hide_unused=${hideUnused}`;
+    if (acct) url += `&profile=${acct}`;
+    if (vpc) url += `&vpc=${vpc}`;
+    if (search) url += `&search=${encodeURIComponent(search)}`;
+    if (risk) {
+        if (risk === 'high') {
+            // critical and high both map to "high" risk_level in analyzer
+            url += `&risk=high`;
+        } else {
+            url += `&risk=${risk}`;
+        }
+    }
+
+    try {
+        const resp = await fetch(url);
+        if (!resp.ok) return;
+        const graphData = await resp.json();
+        graphVpcs = graphData.vpcs || {};
+        lastGraphData = graphData;
+        document.getElementById('emptyState').style.display =
+            graphData.nodes.length === 0 ? 'flex' : 'none';
+        if (currentView === 'graph') {
+            renderGraph(graphData);
+        } else {
+            renderTable();
+        }
+    } catch (e) {
+        console.error('Failed to load graph:', e);
+    }
+}
+
+function renderGraph(graphData) {
+    if (cy) cy.destroy();
+
+    cy = cytoscape({
+        container: document.getElementById('cy'),
+        elements: [...graphData.nodes, ...graphData.edges],
+        style: [
+            // SG nodes
+            { selector: 'node[type="sg"]', style: {
+                'shape': 'ellipse', 'width': 'mapData(resourceCount, 0, 20, 35, 80)',
+                'height': 'mapData(resourceCount, 0, 20, 35, 80)',
+                'label': 'data(label)', 'font-size': '9px', 'color': '#c9d1d9',
+                'text-valign': 'bottom', 'text-margin-y': 6,
+                'text-max-width': '80px', 'text-wrap': 'ellipsis',
+                'border-width': 2,
+            }},
+            { selector: 'node[nodeClass="low"]', style: {
+                'background-color': '#1f6feb', 'border-color': '#58a6ff',
+            }},
+            { selector: 'node[nodeClass="high"]', style: {
+                'background-color': '#da3633', 'border-color': '#f85149',
+            }},
+            { selector: 'node[nodeClass="medium"]', style: {
+                'background-color': '#9e6a03', 'border-color': '#d29922',
+            }},
+            { selector: 'node[nodeClass="unused"]', style: {
+                'background-color': '#484f58', 'border-color': '#6e7681', 'opacity': 0.6,
+            }},
+            // Resource nodes
+            { selector: 'node[type="ec2"]', style: {
+                'shape': 'round-rectangle', 'background-color': '#f0883e', 'border-color': '#f0883e',
+                'width': 28, 'height': 28, 'label': 'data(label)', 'font-size': '8px',
+                'color': '#c9d1d9', 'text-valign': 'bottom', 'text-margin-y': 4,
+                'text-max-width': '70px', 'text-wrap': 'ellipsis', 'border-width': 1,
+            }},
+            { selector: 'node[type="rds"]', style: {
+                'shape': 'round-rectangle', 'background-color': '#3fb950', 'border-color': '#3fb950',
+                'width': 28, 'height': 28, 'label': 'data(label)', 'font-size': '8px',
+                'color': '#c9d1d9', 'text-valign': 'bottom', 'text-margin-y': 4,
+                'text-max-width': '70px', 'text-wrap': 'ellipsis', 'border-width': 1,
+            }},
+            { selector: 'node[type="alb/nlb"], node[type="clb"]', style: {
+                'shape': 'round-rectangle', 'background-color': '#a371f7', 'border-color': '#a371f7',
+                'width': 28, 'height': 28, 'label': 'data(label)', 'font-size': '8px',
+                'color': '#c9d1d9', 'text-valign': 'bottom', 'text-margin-y': 4,
+                'text-max-width': '70px', 'text-wrap': 'ellipsis', 'border-width': 1,
+            }},
+            { selector: 'node[type="vpcendpoint"], node[type="vpcendpoint-eni"]', style: {
+                'shape': 'round-rectangle', 'background-color': '#d29922', 'border-color': '#d29922',
+                'width': 28, 'height': 28, 'label': 'data(label)', 'font-size': '8px',
+                'color': '#c9d1d9', 'text-valign': 'bottom', 'text-margin-y': 4,
+                'text-max-width': '70px', 'text-wrap': 'ellipsis', 'border-width': 1,
+            }},
+            { selector: 'node[type="lambda"], node[type="ecs"], node[type="lambda-eni"], node[type="ecs-eni"]', style: {
+                'shape': 'round-rectangle', 'background-color': '#79c0ff', 'border-color': '#79c0ff',
+                'width': 28, 'height': 28, 'label': 'data(label)', 'font-size': '8px',
+                'color': '#c9d1d9', 'text-valign': 'bottom', 'text-margin-y': 4,
+                'text-max-width': '70px', 'text-wrap': 'ellipsis', 'border-width': 1,
+            }},
+            { selector: 'node[type="aurora"], node[type="documentdb"], node[type="neptune"]', style: {
+                'shape': 'round-rectangle', 'background-color': '#3fb950', 'border-color': '#3fb950',
+                'width': 28, 'height': 28, 'label': 'data(label)', 'font-size': '8px',
+                'color': '#c9d1d9', 'text-valign': 'bottom', 'text-margin-y': 4,
+                'text-max-width': '70px', 'text-wrap': 'ellipsis', 'border-width': 1,
+            }},
+            { selector: 'node[type="elasticache"], node[type="memorydb"], node[type="dax"]', style: {
+                'shape': 'round-rectangle', 'background-color': '#f85149', 'border-color': '#f85149',
+                'width': 28, 'height': 28, 'label': 'data(label)', 'font-size': '8px',
+                'color': '#c9d1d9', 'text-valign': 'bottom', 'text-margin-y': 4,
+                'text-max-width': '70px', 'text-wrap': 'ellipsis', 'border-width': 1,
+            }},
+            { selector: 'node[type="redshift"], node[type="emr"]', style: {
+                'shape': 'round-rectangle', 'background-color': '#a371f7', 'border-color': '#a371f7',
+                'width': 28, 'height': 28, 'label': 'data(label)', 'font-size': '8px',
+                'color': '#c9d1d9', 'text-valign': 'bottom', 'text-margin-y': 4,
+                'text-max-width': '70px', 'text-wrap': 'ellipsis', 'border-width': 1,
+            }},
+            { selector: 'node[type="opensearch"], node[type="mwaa"], node[type="efs"]', style: {
+                'shape': 'round-rectangle', 'background-color': '#d29922', 'border-color': '#d29922',
+                'width': 28, 'height': 28, 'label': 'data(label)', 'font-size': '8px',
+                'color': '#c9d1d9', 'text-valign': 'bottom', 'text-margin-y': 4,
+                'text-max-width': '70px', 'text-wrap': 'ellipsis', 'border-width': 1,
+            }},
+            { selector: 'node[type="eks"], node[type="sagemaker"]', style: {
+                'shape': 'round-rectangle', 'background-color': '#58a6ff', 'border-color': '#58a6ff',
+                'width': 28, 'height': 28, 'label': 'data(label)', 'font-size': '8px',
+                'color': '#c9d1d9', 'text-valign': 'bottom', 'text-margin-y': 4,
+                'text-max-width': '70px', 'text-wrap': 'ellipsis', 'border-width': 1,
+            }},
+            { selector: 'node[type="msk"], node[type="dms"]', style: {
+                'shape': 'round-rectangle', 'background-color': '#8b949e', 'border-color': '#8b949e',
+                'width': 28, 'height': 28, 'label': 'data(label)', 'font-size': '8px',
+                'color': '#c9d1d9', 'text-valign': 'bottom', 'text-margin-y': 4,
+                'text-max-width': '70px', 'text-wrap': 'ellipsis', 'border-width': 1,
+            }},
+            { selector: 'node[type="eni"], node[type="elb-eni"], node[type="rds-eni"], node[type="natgateway"]', style: {
+                'shape': 'round-rectangle', 'background-color': '#484f58', 'border-color': '#6e7681',
+                'width': 22, 'height': 22, 'label': 'data(label)', 'font-size': '7px',
+                'color': '#8b949e', 'text-valign': 'bottom', 'text-margin-y': 4,
+                'text-max-width': '60px', 'text-wrap': 'ellipsis', 'border-width': 1,
+            }},
+            // Edges
+            { selector: 'edge[edgeType="sg_ref"]', style: {
+                'line-color': '#58a6ff', 'target-arrow-color': '#58a6ff',
+                'target-arrow-shape': 'triangle', 'curve-style': 'bezier',
+                'width': 2, 'opacity': 0.7,
+            }},
+            { selector: 'edge[edgeType="uses"]', style: {
+                'line-color': '#6e7681', 'target-arrow-color': '#6e7681',
+                'target-arrow-shape': 'triangle', 'curve-style': 'bezier',
+                'width': 1, 'opacity': 0.4, 'line-style': 'dashed',
+            }},
+            // Selection
+            { selector: ':selected', style: {
+                'border-width': 3, 'border-color': '#f0883e',
+            }},
+        ],
+        layout: { name: 'preset' },  // positions set manually via VPC-aware layout below
+        wheelSensitivity: 0.3,
+        minZoom: 0.1,
+        maxZoom: 5,
+        textureOnViewport: true,
+        hideEdgesOnViewport: true,
+        pixelRatio: 'auto',
+    });
+
+    // === VPC-aware two-level layout ===
+    // 1. Group nodes by VPC
+    const vpcNodeMap = {};  // vpcId -> [node ids]
+    const noVpcNodes = [];
+    cy.nodes().forEach(node => {
+        const vpcId = node.data('vpcId');
+        if (vpcId) {
+            if (!vpcNodeMap[vpcId]) vpcNodeMap[vpcId] = [];
+            vpcNodeMap[vpcId].push(node.id());
+        } else {
+            noVpcNodes.push(node.id());
+        }
+    });
+
+    // 2. Layout each VPC group independently using cose on a temp instance
+    const vpcLayouts = {};  // vpcId -> { positions: {nodeId: {x,y}}, width, height }
+    const vpcIds = Object.keys(vpcNodeMap);
+
+    for (const vpcId of vpcIds) {
+        const nodeIds = new Set(vpcNodeMap[vpcId]);
+        // Collect elements: nodes in this VPC + edges between them
+        const subElements = [];
+        cy.nodes().forEach(n => {
+            if (nodeIds.has(n.id())) subElements.push({ group: 'nodes', data: { ...n.data() } });
+        });
+        cy.edges().forEach(e => {
+            if (nodeIds.has(e.source().id()) && nodeIds.has(e.target().id())) {
+                subElements.push({ group: 'edges', data: { ...e.data() } });
+            }
+        });
+
+        if (subElements.filter(e => e.group === 'nodes').length === 0) continue;
+
+        // Create temp offscreen cytoscape for layout calculation
+        const tempDiv = document.createElement('div');
+        tempDiv.style.cssText = 'width:800px;height:600px;position:absolute;left:-9999px;top:-9999px;';
+        document.body.appendChild(tempDiv);
+
+        const tempCy = cytoscape({
+            container: tempDiv,
+            elements: subElements,
+            style: [{ selector: 'node', style: { 'width': 30, 'height': 30 } }],
+            layout: { name: 'preset' },
+        });
+
+        // Run cose layout synchronously
+        const layout = tempCy.layout({
+            name: 'cose',
+            animate: false,
+            nodeRepulsion: function() { return 10000; },
+            idealEdgeLength: function(edge) {
+                return edge.data('edgeType') === 'sg_ref' ? 150 : 80;
+            },
+            nodeOverlap: 20,
+            gravity: 0.4,
+            numIter: 400,
+            randomize: true,
+            fit: true,
+            padding: 10,
+        });
+        layout.run();
+
+        // Extract relative positions and bounding box
+        const positions = {};
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        tempCy.nodes().forEach(n => {
+            const pos = n.position();
+            positions[n.id()] = { x: pos.x, y: pos.y };
+            minX = Math.min(minX, pos.x);
+            minY = Math.min(minY, pos.y);
+            maxX = Math.max(maxX, pos.x);
+            maxY = Math.max(maxY, pos.y);
+        });
+
+        // Normalize to origin (0,0)
+        for (const id in positions) {
+            positions[id].x -= minX;
+            positions[id].y -= minY;
+        }
+
+        vpcLayouts[vpcId] = {
+            positions,
+            width: Math.max(maxX - minX, 100),
+            height: Math.max(maxY - minY, 100),
+        };
+
+        tempCy.destroy();
+        document.body.removeChild(tempDiv);
+    }
+
+    // 3. Arrange VPC groups in a grid (batch mode for performance)
+    cy.startBatch();
+
+    const cols = Math.ceil(Math.sqrt(vpcIds.length));
+    const gap = 100;
+    let gridX = 0, gridY = 0, colIdx = 0, rowMaxH = 0;
+
+    for (let i = 0; i < vpcIds.length; i++) {
+        const vpcId = vpcIds[i];
+        const layout = vpcLayouts[vpcId];
+        if (!layout) continue;
+
+        // Set positions with grid offset
+        for (const nodeId in layout.positions) {
+            const pos = layout.positions[nodeId];
+            const node = cy.getElementById(nodeId);
+            if (node.length) {
+                node.position({ x: gridX + pos.x, y: gridY + pos.y });
+            }
+        }
+
+        rowMaxH = Math.max(rowMaxH, layout.height);
+        gridX += layout.width + gap;
+        colIdx++;
+
+        if (colIdx >= cols) {
+            colIdx = 0;
+            gridX = 0;
+            gridY += rowMaxH + gap;
+            rowMaxH = 0;
+        }
+    }
+
+    // Place nodes without VPC at the end
+    if (noVpcNodes.length > 0) {
+        let nx = gridX;
+        for (const nodeId of noVpcNodes) {
+            const node = cy.getElementById(nodeId);
+            if (node.length) {
+                node.position({ x: nx, y: gridY + 50 });
+                nx += 60;
+            }
+        }
+    }
+
+    cy.endBatch();
+
+    // Auto-hide resource nodes when too many nodes for performance
+    const totalNodes = cy.nodes().length;
+    const perfNotice = document.getElementById('perfNotice');
+    resourceNodesHidden = false;
+    if (totalNodes > 200) {
+        resourceNodesHidden = true;
+        cy.nodes().forEach(n => {
+            if (n.data('type') !== 'sg') n.style('display', 'none');
+        });
+        perfNotice.classList.add('active');
+    } else {
+        perfNotice.classList.remove('active');
+    }
+
+    cy.fit(undefined, 50);
+
+    // Draw VPC boundaries on canvas underlay after layout
+    const cyCanvas = document.createElement('canvas');
+    cyCanvas.id = 'vpc-overlay';
+    cyCanvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:1;';
+    const cyContainer = document.getElementById('cy');
+    // Remove old overlay
+    const oldCanvas = document.getElementById('vpc-overlay');
+    if (oldCanvas) oldCanvas.remove();
+    cyContainer.appendChild(cyCanvas);
+
+    function drawVpcBoundaries() {
+        const canvas = document.getElementById('vpc-overlay');
+        if (!canvas) return;
+        const rect = canvas.parentElement.getBoundingClientRect();
+        canvas.width = rect.width * window.devicePixelRatio;
+        canvas.height = rect.height * window.devicePixelRatio;
+        const ctx = canvas.getContext('2d');
+        ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+        ctx.clearRect(0, 0, rect.width, rect.height);
+
+        // Group nodes by VPC
+        const vpcGroups = {};
+        cy.nodes().forEach(node => {
+            const vpcId = node.data('vpcId');
+            if (!vpcId) return;
+            if (!vpcGroups[vpcId]) vpcGroups[vpcId] = [];
+            const pos = node.renderedPosition();
+            const w = node.renderedOuterWidth();
+            const h = node.renderedOuterHeight();
+            vpcGroups[vpcId].push({ x: pos.x, y: pos.y, w, h });
+        });
+
+        const colorKeys = Object.keys(vpcGroups);
+        colorKeys.forEach((vpcId, idx) => {
+            const points = vpcGroups[vpcId];
+            if (points.length === 0) return;
+
+            const pad = 30;
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            for (const p of points) {
+                minX = Math.min(minX, p.x - p.w/2);
+                minY = Math.min(minY, p.y - p.h/2);
+                maxX = Math.max(maxX, p.x + p.w/2);
+                maxY = Math.max(maxY, p.y + p.h/2);
+            }
+
+            const color = VPC_COLORS[idx % VPC_COLORS.length];
+            const x = minX - pad, y = minY - pad;
+            const w = maxX - minX + pad*2, h = maxY - minY + pad*2;
+            const r = 12;
+
+            // Rounded rect
+            ctx.beginPath();
+            ctx.moveTo(x+r, y);
+            ctx.lineTo(x+w-r, y); ctx.arcTo(x+w, y, x+w, y+r, r);
+            ctx.lineTo(x+w, y+h-r); ctx.arcTo(x+w, y+h, x+w-r, y+h, r);
+            ctx.lineTo(x+r, y+h); ctx.arcTo(x, y+h, x, y+h-r, r);
+            ctx.lineTo(x, y+r); ctx.arcTo(x, y, x+r, y, r);
+            ctx.closePath();
+
+            ctx.fillStyle = color.bg;
+            ctx.fill();
+            ctx.strokeStyle = color.border;
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([6, 4]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Label
+            const label = graphVpcs[vpcId] || vpcId;
+            ctx.font = 'bold 11px -apple-system, sans-serif';
+            ctx.fillStyle = color.border;
+            ctx.fillText(label, x + 8, y + 14);
+        });
+    }
+
+    // Redraw on viewport changes
+    cy.on('render viewport', drawVpcBoundaries);
+    setTimeout(drawVpcBoundaries, 100);
+
+    // Click handler - SG detail
+    cy.on('tap', 'node[type="sg"]', function(evt) {
+        showSgDetail(evt.target.data('id'));
+    });
+
+    // Hover tooltip
+    const tooltip = document.getElementById('tooltip');
+    cy.on('mouseover', 'node', function(evt) {
+        const d = evt.target.data();
+        if (d.type === 'vpc') return;
+        let html = `<strong>${d.label}</strong><br>`;
+        if (d.type === 'sg') {
+            html += `ID: ${d.id}<br>VPC: ${d.vpcId}<br>Resources: ${d.resourceCount}<br>`;
+            html += `Inbound: ${d.inboundCount} | Outbound: ${d.outboundCount}`;
+            if (d.profile) html += `<br>Profile: ${d.profile}`;
+        } else {
+            html += `Type: ${d.type}<br>ID: ${d.id}`;
+        }
+        tooltip.innerHTML = html;
+        tooltip.style.display = 'block';
+    });
+    cy.on('mousemove', function(evt) {
+        tooltip.style.left = (evt.originalEvent.clientX + 12) + 'px';
+        tooltip.style.top = (evt.originalEvent.clientY + 12) + 'px';
+    });
+    cy.on('mouseout', 'node', function() {
+        tooltip.style.display = 'none';
+    });
+
+    // Highlight neighbors on click
+    cy.on('tap', 'node', function(evt) {
+        cy.elements().removeClass('highlighted dimmed');
+        const node = evt.target;
+        const neighborhood = node.neighborhood().add(node);
+        cy.elements().not(neighborhood).addClass('dimmed');
+        neighborhood.addClass('highlighted');
+    });
+    cy.on('tap', function(evt) {
+        if (evt.target === cy) {
+            cy.elements().removeClass('highlighted dimmed');
+        }
+    });
+
+    cy.style().selector('.dimmed').style({ 'opacity': 0.12 }).update();
+    cy.style().selector('.highlighted').style({ 'opacity': 1 }).update();
+}
+
+async function showSgDetail(sgId) {
+    const panel = document.getElementById('sidePanel');
+    const content = document.getElementById('panelContent');
+    panel.classList.remove('collapsed');
+
+    try {
+        const resp = await fetch(`/api/sg/${sgId}`);
+        if (!resp.ok) return;
+        const sg = await resp.json();
+
+        document.getElementById('panelTitle').textContent = `${sg.name || sg.id}`;
+
+        let html = '';
+
+        // Basic info
+        html += `<div class="panel-section">
+            <div class="panel-section-title">Security Group 정보</div>
+            <div class="detail-row"><span class="detail-label">ID</span><span class="detail-value">${sg.id}</span></div>
+            <div class="detail-row"><span class="detail-label">Name</span><span class="detail-value">${sg.name}</span></div>
+            <div class="detail-row"><span class="detail-label">VPC</span><span class="detail-value">${sg.vpc_id}</span></div>
+            ${sg.profile ? `<div class="detail-row"><span class="detail-label">Profile</span><span class="detail-value">${sg.profile}</span></div>` : ''}
+            ${sg.account_id ? `<div class="detail-row"><span class="detail-label">Account</span><span class="detail-value">${sg.account_id}</span></div>` : ''}
+            <div class="detail-row"><span class="detail-label">Description</span><span class="detail-value">${sg.description || '-'}</span></div>
+            <div class="detail-row"><span class="detail-label">Risk Level</span>
+                <span class="risk-badge ${sg.risk_level || 'low'}">${(sg.risk_level || 'low').toUpperCase()}</span>
+            </div>
+            <div class="detail-row"><span class="detail-label">Resources</span><span class="detail-value">${sg.resource_count}</span></div>
+        </div>`;
+
+        // Risky rules warning
+        if (sg.risky_rules && sg.risky_rules.length > 0) {
+            html += `<div class="panel-section" style="background:#da363310;">
+                <div class="panel-section-title" style="color:#f85149;">⚠️ 보안 위험 규칙</div>`;
+            for (const r of sg.risky_rules) {
+                html += `<div class="rule-card" style="border-color:#da3633;">
+                    <div class="rule-header">
+                        <span class="rule-tag danger">${r.risk_level}</span>
+                        <span class="rule-tag protocol">${r.protocol}</span>
+                        <span class="rule-tag port">${r.port}</span>
+                        <span style="font-size:10px;color:#8b949e;">${r.direction}</span>
+                    </div>
+                    <div class="rule-source">${r.source} — ${r.description}</div>
+                </div>`;
+            }
+            html += `</div>`;
+        }
+
+        // Inbound rules
+        html += `<div class="panel-section">
+            <div class="panel-section-title">Ingress Rules (인바운드) ${sg.inbound_rules.length}개</div>`;
+        if (sg.inbound_rules.length === 0) {
+            html += '<div style="font-size:11px;color:#6e7681;">규칙이 없습니다.</div>';
+        }
+        for (const rule of sg.inbound_rules) {
+            html += `<div class="rule-card">
+                <div class="rule-header">
+                    <span class="rule-tag protocol">${rule.protocol}</span>
+                    <span class="rule-tag port">${rule.port}</span>
+                </div>`;
+            for (const src of rule.sources) {
+                const isDanger = src.value === '0.0.0.0/0' || src.value === '::/0';
+                html += `<div class="rule-source">${isDanger ? '⚠️ ' : ''}${src.value}${src.description ? ' — ' + src.description : ''}</div>`;
+            }
+            html += '</div>';
+        }
+        html += '</div>';
+
+        // Outbound rules
+        html += `<div class="panel-section">
+            <div class="panel-section-title">Egress Rules (아웃바운드) ${sg.outbound_rules.length}개</div>`;
+        if (sg.outbound_rules.length === 0) {
+            html += '<div style="font-size:11px;color:#6e7681;">규칙이 없습니다.</div>';
+        }
+        for (const rule of sg.outbound_rules) {
+            html += `<div class="rule-card">
+                <div class="rule-header">
+                    <span class="rule-tag protocol">${rule.protocol}</span>
+                    <span class="rule-tag port">${rule.port}</span>
+                </div>`;
+            for (const src of rule.sources) {
+                html += `<div class="rule-source">${src.value}${src.description ? ' — ' + src.description : ''}</div>`;
+            }
+            html += '</div>';
+        }
+        html += '</div>';
+
+        // Resources
+        html += `<div class="panel-section">
+            <div class="panel-section-title">연결된 리소스 ${sg.resources.length}개</div>`;
+        if (sg.resources.length === 0) {
+            html += '<div style="font-size:11px;color:#6e7681;">연결된 리소스가 없습니다. (미사용 SG)</div>';
+        }
+        for (const res of sg.resources) {
+            const typeClass = res.type.toLowerCase().replace('/', '');
+            html += `<div class="resource-item">
+                <span class="resource-badge ${typeClass}">${res.type}</span>
+                <span>${res.name || res.id}</span>
+            </div>`;
+        }
+        html += '</div>';
+
+        // SG References
+        if (sg.sg_references && sg.sg_references.length > 0) {
+            html += `<div class="panel-section">
+                <div class="panel-section-title">SG 간 참조</div>`;
+            for (const ref of sg.sg_references) {
+                html += `<div class="resource-item" onclick="showSgDetail('${ref}')" style="cursor:pointer;">
+                    <span class="resource-badge" style="background:#58a6ff30;color:#58a6ff;">SG</span>
+                    <span>${ref}</span>
+                </div>`;
+            }
+            html += '</div>';
+        }
+
+        content.innerHTML = html;
+    } catch (e) {
+        content.innerHTML = `<div class="panel-section"><p>Failed to load: ${e}</p></div>`;
+    }
+}
+
+function showDefaultSgWarnings() {
+    if (!findings || !findings.default_sg_warnings || findings.default_sg_warnings.length === 0) {
+        alert('규칙이 있는 default SG가 없습니다.');
+        return;
+    }
+
+    const panel = document.getElementById('sidePanel');
+    const content = document.getElementById('panelContent');
+    panel.classList.remove('collapsed');
+    document.getElementById('panelTitle').textContent = 'Default SG 규칙 검토';
+
+    let html = `<div class="panel-section" style="background:#d2992210;">
+        <div class="panel-section-title" style="color:#d29922;">⚠️ Default SG는 삭제 불가 — 불필요한 규칙 제거 권장</div>
+        <div style="font-size:11px;color:#8b949e;margin-bottom:8px;">
+            default SG는 VPC 생성 시 자동으로 만들어지며 삭제할 수 없습니다.<br>
+            하지만 인바운드 규칙은 제거할 수 있으므로, 사용하지 않는 규칙은 정리하세요.
+        </div>
+    </div>`;
+
+    for (const w of findings.default_sg_warnings) {
+        const sevColor = w.severity === 'high' ? '#f85149' : '#d29922';
+        html += `<div class="panel-section">
+            <div class="panel-section-title" style="color:${sevColor};">
+                ${w.severity === 'high' ? '🔴' : '🟡'} ${w.vpc_id}
+            </div>
+            <div class="detail-row"><span class="detail-label">SG ID</span><span class="detail-value">${w.sg_id}</span></div>
+            <div class="detail-row"><span class="detail-label">리소스</span><span class="detail-value">${w.has_resources ? w.resource_count + '개 연결' : '없음 (미사용)'}</span></div>
+            <div class="detail-row"><span class="detail-label">상태</span><span class="risk-badge ${w.severity}">${w.reason}</span></div>
+            <div style="margin-top:8px;font-size:11px;font-weight:600;color:#8b949e;">인바운드 규칙 (${w.inbound_rule_count}개):</div>`;
+
+        for (const rule of w.inbound_rules) {
+            html += `<div class="rule-card">
+                <div class="rule-header">
+                    <span class="rule-tag protocol">${rule.protocol}</span>
+                    <span class="rule-tag port">${rule.port}</span>
+                </div>`;
+            for (const src of rule.sources) {
+                const isDanger = src === '0.0.0.0/0' || src === '::/0';
+                html += `<div class="rule-source">${isDanger ? '⚠️ ' : ''}${src}</div>`;
+            }
+            html += '</div>';
+        }
+        html += '</div>';
+    }
+
+    content.innerHTML = html;
+}
+
+function closePanel() {
+    document.getElementById('sidePanel').classList.add('collapsed');
+}
+
+async function showCollectModal() {
+    document.getElementById('collectModal').classList.add('active');
+    // Load profiles from ~/.aws/config
+    try {
+        const resp = await fetch('/api/profiles');
+        if (resp.ok) {
+            const profiles = await resp.json();
+            const container = document.getElementById('profileList');
+            container.innerHTML = profiles.map(p => `
+                <label style="display:flex;align-items:center;gap:8px;padding:4px 6px;cursor:pointer;font-size:13px;color:#c9d1d9;">
+                    <input type="checkbox" class="profile-cb" value="${p}" ${p === 'default' ? 'checked' : ''} style="flex-shrink:0;width:16px;height:16px;margin:0;">
+                    <span style="font-family:monospace;">${p}</span>
+                </label>
+            `).join('');
+        }
+    } catch (e) {
+        console.error('Failed to load profiles:', e);
+    }
+}
+
+function selectAllProfiles(checked) {
+    document.querySelectorAll('.profile-cb').forEach(cb => cb.checked = checked);
+}
+function closeCollectModal() {
+    document.getElementById('collectModal').classList.remove('active');
+}
+
+async function collectData() {
+    closeCollectModal();
+    const profiles = Array.from(document.querySelectorAll('.profile-cb:checked')).map(cb => cb.value);
+    if (profiles.length === 0) { alert('프로필을 하나 이상 선택하세요.'); return; }
+    const region = document.getElementById('awsRegion').value || undefined;
+
+    showLoading(`AWS 데이터 수집 중 (${profiles.length}개 프로필)...`);
+
+    try {
+        const resp = await fetch('/api/collect', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ profiles, region }),
+        });
+        const result = await resp.json();
+        if (result.status === 'ok') {
+            const successes = result.results.filter(r => r.status === 'ok');
+            const failures = result.results.filter(r => r.status === 'error');
+            const skipped = result.skipped || [];
+            hideLoading();
+            let msg = `수집 완료: ${successes.length}개 프로필`;
+            if (skipped.length > 0) {
+                msg += `\n\n중복 계정 스킵 (${skipped.length}개):\n` + skipped.map(s => `  ${s.profile} → ${s.account_id}`).join('\n');
+            }
+            if (failures.length > 0) {
+                msg += `\n\n실패 (${failures.length}개):\n` + failures.map(f => `  ${f.profile}: ${f.message}`).join('\n');
+            }
+            if (skipped.length > 0 || failures.length > 0) {
+                alert(msg);
+            }
+            await loadCachedData();
+        } else {
+            hideLoading();
+            alert('Error: ' + JSON.stringify(result));
+        }
+    } catch (e) {
+        hideLoading();
+        alert('Failed: ' + e.message);
+    }
+}
+
+function showLoading(text) {
+    document.getElementById('loadingText').textContent = text;
+    document.getElementById('loadingOverlay').classList.add('active');
+}
+function hideLoading() {
+    document.getElementById('loadingOverlay').classList.remove('active');
+}
+
+function exportUnused(fmt) {
+    const acct = document.getElementById('profileFilter').value;
+    let url = `/api/export/unused?format=${fmt}`;
+    if (acct) url += `&profile=${acct}`;
+    window.open(url, '_blank');
+}
+
+// Debounced search - auto filter after 300ms
+let searchTimer = null;
+document.getElementById('searchInput').addEventListener('keyup', function(e) {
+    if (e.key === 'Enter') { refreshGraph(); return; }
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => refreshGraph(), 300);
+});
+
+// View toggle
+function switchView(view) {
+    currentView = view;
+    document.getElementById('btnGraphView').classList.toggle('active', view === 'graph');
+    document.getElementById('btnTableView').classList.toggle('active', view === 'table');
+    document.getElementById('graphContainer').style.display = view === 'graph' ? '' : 'none';
+    document.getElementById('tableContainer').classList.toggle('active', view === 'table');
+    if (view === 'table') renderTable();
+}
+
+// Toggle resource nodes visibility
+function toggleResourceNodes() {
+    if (!cy) return;
+    resourceNodesHidden = !resourceNodesHidden;
+    cy.startBatch();
+    cy.nodes().forEach(n => {
+        if (n.data('type') !== 'sg') {
+            n.style('display', resourceNodesHidden ? 'none' : 'element');
+        }
+    });
+    cy.endBatch();
+    const btn = document.querySelector('#perfNotice .btn');
+    btn.textContent = resourceNodesHidden ? '리소스 표시' : '리소스 숨기기';
+}
+
+// Table view
+async function renderTable() {
+    const acct = document.getElementById('profileFilter').value;
+    const vpc = document.getElementById('vpcFilter').value;
+    const search = document.getElementById('searchInput').value.toLowerCase();
+    const risk = document.getElementById('riskFilter').value;
+    const hideUnused = document.getElementById('hideUnused').checked;
+
+    // Use graph API to get filtered SG list
+    let url = `/api/graph?hide_unused=${hideUnused}`;
+    if (acct) url += `&profile=${acct}`;
+    if (vpc) url += `&vpc=${vpc}`;
+    if (search) url += `&search=${encodeURIComponent(search)}`;
+    if (risk) url += `&risk=${risk === 'high' ? 'high' : risk}`;
+
+    try {
+        const resp = await fetch(url);
+        if (!resp.ok) return;
+        const graphData = await resp.json();
+
+        // Extract SG nodes only
+        const sgNodes = graphData.nodes
+            .filter(n => n.data.type === 'sg')
+            .map(n => n.data);
+
+        // Sort
+        sgNodes.sort((a, b) => {
+            let va = a[tableSortCol] ?? '';
+            let vb = b[tableSortCol] ?? '';
+            if (tableSortCol === 'inbound') { va = a.inboundCount; vb = b.inboundCount; }
+            if (tableSortCol === 'outbound') { va = a.outboundCount; vb = b.outboundCount; }
+            if (tableSortCol === 'resource_count') { va = a.resourceCount; vb = b.resourceCount; }
+            if (tableSortCol === 'name') { va = a.label; vb = b.label; }
+            if (tableSortCol === 'risk_level') { va = riskOrder(a.nodeClass); vb = riskOrder(b.nodeClass); }
+            if (typeof va === 'number' && typeof vb === 'number') return tableSortAsc ? va - vb : vb - va;
+            va = String(va).toLowerCase(); vb = String(vb).toLowerCase();
+            return tableSortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+        });
+
+        // Update sort arrows
+        document.querySelectorAll('.sg-table th').forEach(th => {
+            const arrow = th.querySelector('.sort-arrow');
+            if (th.dataset.col === tableSortCol) {
+                arrow.textContent = tableSortAsc ? '▲' : '▼';
+            } else {
+                arrow.textContent = '';
+            }
+        });
+
+        // Render rows
+        const tbody = document.getElementById('sgTableBody');
+        tbody.innerHTML = sgNodes.map(sg => {
+            const vpcLabel = graphData.vpcs[sg.vpcId] || sg.vpcId || '-';
+            const riskClass = sg.nodeClass || 'low';
+            const desc = escHtml(sg.description || '-');
+            const label = escHtml(sg.label || '');
+            return `<tr onclick="showSgDetail('${sg.id}')">
+                <td title="${label}">${label}</td>
+                <td class="mono">${sg.id}</td>
+                <td title="${escHtml(vpcLabel)}" style="max-width:150px;">${escHtml(vpcLabel)}</td>
+                <td><span class="risk-badge ${riskClass}">${riskClass.toUpperCase()}</span></td>
+                <td style="text-align:center;">${sg.resourceCount}</td>
+                <td style="text-align:center;">${sg.inboundCount}</td>
+                <td style="text-align:center;">${sg.outboundCount}</td>
+                <td title="${desc}" style="max-width:250px;color:#8b949e;">${desc}</td>
+            </tr>`;
+        }).join('');
+
+    } catch (e) {
+        console.error('Table render failed:', e);
+    }
+}
+
+function escHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+}
+
+function riskOrder(level) {
+    return { critical: 0, high: 1, medium: 2, low: 3, unused: 4 }[level] ?? 5;
+}
+
+function sortTable(col) {
+    if (tableSortCol === col) {
+        tableSortAsc = !tableSortAsc;
+    } else {
+        tableSortCol = col;
+        tableSortAsc = true;
+    }
+    renderTable();
+}
+</script>
+</body>
+</html>
