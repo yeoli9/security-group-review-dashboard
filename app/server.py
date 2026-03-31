@@ -222,6 +222,7 @@ def api_graph():
     hide_unused = request.args.get("hide_unused", "false") == "true"
     search = request.args.get("search", "").lower()
     risk_filter = request.args.get("risk")  # critical, high, medium, low, unused
+    tag_group = request.args.get("tag_group")  # Tag name to color/group by
 
     # Gather SGs from selected accounts
     all_sgs = []
@@ -280,6 +281,7 @@ def api_graph():
                 "profile": sg.get("_profile", ""),
                 "description": sg.get("description", ""),
                 "inCircularRef": sg.get("in_circular_ref", False),
+                "tagValue": _get_tag_value(sg, tag_group) if tag_group else None,
             }
         })
 
@@ -365,6 +367,29 @@ def api_graph():
     stats["governance_warnings"] = len(gov_warnings)
 
     return jsonify({"nodes": unique_nodes, "edges": valid_edges, "vpcs": vpc_meta, "stats": stats})
+
+
+def _get_tag_value(sg, tag_key):
+    """Get a tag value from SG by AWS tag key name."""
+    for t in sg.get("tags", []):
+        if t.get("Key") == tag_key:
+            return t["Value"]
+    return None
+
+
+@app.route("/api/tag-values")
+def api_tag_values():
+    """Return distinct tag keys and their values across all SGs."""
+    if not _accounts:
+        _load_cache()
+    tag_map = {}  # key -> set of values
+    for acct in _accounts.values():
+        for sg in acct["data"]["security_groups"]:
+            for t in sg.get("tags", []):
+                key = t.get("Key", "")
+                if key:
+                    tag_map.setdefault(key, set()).add(t.get("Value", ""))
+    return jsonify({k: sorted(v) for k, v in sorted(tag_map.items())})
 
 
 @app.route("/api/sg/<sg_id>")

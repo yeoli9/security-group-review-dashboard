@@ -241,6 +241,10 @@
             <option value="circular">Circular</option>
             <option value="unused">Unused</option>
         </select>
+        <label>Tag</label>
+        <select id="tagGroupFilter" style="max-width:140px;" onchange="refreshGraph()">
+            <option value="">None</option>
+        </select>
         <input id="searchInput" type="text" placeholder="Search SG..." style="width:130px;">
         <label><input type="checkbox" id="hideUnused" onchange="refreshGraph()"> Hide Unused</label>
         <button class="btn" onclick="refreshGraph()">Filter</button>
@@ -273,6 +277,7 @@
             <div class="icon">🛡️</div>
             <p>데이터가 없습니다. "Collect"를 클릭하여 AWS에서 보안그룹을 수집하세요.</p>
         </div>
+        <div id="tagLegend" style="position:absolute;bottom:10px;left:10px;z-index:10;background:#161b2280;backdrop-filter:blur(4px);padding:6px 12px;border-radius:6px;display:flex;flex-wrap:wrap;gap:4px;max-width:80%;"></div>
         <div class="perf-notice" id="perfNotice">
             <span>노드가 많아 리소스 노드를 숨겼습니다.</span>
             <button class="btn" onclick="toggleResourceNodes()">리소스 표시</button>
@@ -401,6 +406,7 @@ async function loadCachedData() {
             allData = await dataResp.json();
             findings = await findingsResp.json();
             populateVpcFilter();
+            populateTagFilter();
             updateStats();
             await refreshGraph();
         }
@@ -434,6 +440,22 @@ function populateVpcFilter() {
         const label = vpc.name ? `${vpc.name} (${shortId})` : id;
         sel.innerHTML += `<option value="${id}">${label}</option>`;
     }
+}
+
+async function populateTagFilter() {
+    const sel = document.getElementById('tagGroupFilter');
+    const current = sel.value;
+    sel.innerHTML = '<option value="">None</option>';
+    try {
+        const resp = await fetch('/api/tag-values');
+        if (resp.ok) {
+            const tagMap = await resp.json();
+            for (const key of Object.keys(tagMap)) {
+                sel.innerHTML += `<option value="${key}">${key} (${tagMap[key].length})</option>`;
+            }
+        }
+    } catch (e) { /* ignore */ }
+    sel.value = current;
 }
 
 function updateStats(stats) {
@@ -470,8 +492,10 @@ async function refreshGraph() {
     const search = document.getElementById('searchInput').value;
     const hideUnused = document.getElementById('hideUnused').checked;
     const risk = document.getElementById('riskFilter').value;
+    const tagGroup = document.getElementById('tagGroupFilter').value;
 
     let url = `/api/graph?hide_unused=${hideUnused}`;
+    if (tagGroup) url += `&tag_group=${encodeURIComponent(tagGroup)}`;
     if (acct) url += `&profile=${encodeURIComponent(acct)}`;
     if (vpc) url += `&vpc=${encodeURIComponent(vpc)}`;
     if (search) url += `&search=${encodeURIComponent(search)}`;
@@ -502,6 +526,68 @@ async function refreshGraph() {
     } catch (e) {
         console.error('Failed to load graph:', e);
     }
+}
+
+const TAG_PALETTE = [
+    { bg: '#1f6feb', border: '#58a6ff' },
+    { bg: '#238636', border: '#3fb950' },
+    { bg: '#9e6a03', border: '#d29922' },
+    { bg: '#8957e5', border: '#a371f7' },
+    { bg: '#da3633', border: '#f85149' },
+    { bg: '#0d8a8a', border: '#2dd4bf' },
+    { bg: '#c4432b', border: '#f0883e' },
+    { bg: '#6e40aa', border: '#9d74d1' },
+];
+
+function applyTagColoring(graphData) {
+    const tagGroup = document.getElementById('tagGroupFilter').value;
+    const legendEl = document.getElementById('tagLegend');
+    if (!tagGroup || !cy) {
+        legendEl.innerHTML = '';
+        return;
+    }
+
+    // Collect unique tag values
+    const tagValues = [];
+    const seen = new Set();
+    for (const n of graphData.nodes) {
+        const v = n.data.tagValue;
+        if (v && !seen.has(v)) { seen.add(v); tagValues.push(v); }
+    }
+    tagValues.sort();
+
+    // Assign colors and apply styles
+    const colorMap = {};
+    tagValues.forEach((v, i) => {
+        colorMap[v] = TAG_PALETTE[i % TAG_PALETTE.length];
+    });
+
+    // Override SG node colors based on tag value
+    cy.nodes('[type="sg"]').forEach(node => {
+        const tv = node.data('tagValue');
+        if (tv && colorMap[tv]) {
+            node.style({ 'background-color': colorMap[tv].bg, 'border-color': colorMap[tv].border });
+        } else if (tv === null || tv === undefined) {
+            node.style({ 'background-color': '#484f58', 'border-color': '#6e7681', 'opacity': 0.5 });
+        }
+    });
+
+    // Build legend
+    let html = `<span style="font-size:11px;color:#8b949e;margin-right:8px;">${tagGroup}:</span>`;
+    for (const [val, color] of Object.entries(colorMap)) {
+        html += `<span style="display:inline-flex;align-items:center;margin-right:10px;font-size:11px;">
+            <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${color.bg};border:1px solid ${color.border};margin-right:4px;"></span>
+            ${val}
+        </span>`;
+    }
+    const noTagCount = graphData.nodes.filter(n => n.data.type === 'sg' && !n.data.tagValue).length;
+    if (noTagCount > 0) {
+        html += `<span style="display:inline-flex;align-items:center;margin-right:10px;font-size:11px;color:#6e7681;">
+            <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#484f58;border:1px solid #6e7681;margin-right:4px;"></span>
+            No tag (${noTagCount})
+        </span>`;
+    }
+    legendEl.innerHTML = html;
 }
 
 function renderGraph(graphData) {
@@ -861,6 +947,9 @@ function renderGraph(graphData) {
             ctx.fillText(label, x + 8, y + 14);
         });
     }
+
+    // Apply tag-based coloring if active
+    applyTagColoring(graphData);
 
     // Redraw on viewport changes
     cy.on('render viewport', drawVpcBoundaries);
