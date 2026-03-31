@@ -30,30 +30,44 @@ Visualizes SGs as nodes with resource connections and SG-to-SG references as edg
 
 ![Graph View](docs/images/graph-view.png)
 
-## Installation & Usage
+---
+
+## Quick Start
 
 ### Prerequisites
 
-- Python 3.9+
 - AWS CLI profile configured (`~/.aws/config` or `~/.aws/credentials`)
-
-### Install
-
-```bash
-git clone https://github.com/yeoli9/security-group-review-dashboard.git
-cd security-group-review-dashboard
-pip install -r requirements.txt
-```
+- Required IAM permissions: [see below](#required-iam-permissions)
 
 ### Run
 
 ```bash
-python server.py 5001
+git clone https://github.com/yeoli9/security-group-review-dashboard.git
+cd security-group-review-dashboard
+
+./run.sh
 ```
 
-Open http://localhost:5001 in your browser and click **Collect** to start gathering data.
+Use arrow keys to select from the interactive menu.
 
-### Workflow
+```
+  AWS Security Group Review Dashboard
+  ────────────────────────────────────────
+
+   > Local Setup + Run   Python venv setup + start server
+     Local Run            Start server with existing venv
+     Docker Compose       Build + run with Docker
+     Docker Compose Down  Stop Docker containers
+     Clean                Remove venv, cache, etc.
+
+  ↑↓ Select  Enter Run  q Quit
+```
+
+Open http://localhost:5000 and click **Collect** to start gathering data.
+
+---
+
+## Workflow
 
 1. Click **Collect** → Select AWS profiles → Start collection
 2. Review SG status in graph or table view
@@ -111,10 +125,13 @@ Only read-only permissions are used. (No write APIs)
 ## Project Structure
 
 ```
+├── server.py             # Flask API server
 ├── collector.py          # AWS data collection (23 resource types)
 ├── analyzer.py           # SG analysis (unused, risky rules, circular refs, redundant rules)
-├── server.py             # Flask API server
 ├── requirements.txt      # Python dependencies
+├── run.sh                # Interactive launch script
+├── Dockerfile            # Docker image build
+├── docker-compose.yml    # Docker Compose config
 ├── static/
 │   └── index.html        # Dashboard frontend (Cytoscape.js)
 └── docs/
@@ -134,3 +151,16 @@ Only read-only permissions are used. (No write APIs)
 | GET | `/api/graph` | Graph visualization data |
 | GET | `/api/sg/{id}` | SG detail |
 | GET | `/api/export/unused` | Export unused SGs (JSON/CSV) |
+
+## Contributing
+
+Contributions are welcome! Feel free to open an Issue or submit a Pull Request.
+
+1. Fork and create a branch (`git checkout -b feature/my-feature`)
+2. Commit your changes (`git commit -m 'Add my feature'`)
+3. Push the branch (`git push origin feature/my-feature`)
+4. Open a Pull Request
+
+## License
+
+[MIT License](LICENSE)

@@ -5,3 +5,10 @@ sg_data_cache.json
 *.egg-info/
 dist/
 build/
+.venv/
+venv/
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
