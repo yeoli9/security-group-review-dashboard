@@ -8,6 +8,8 @@ ISMS 보안 검토를 위한 AWS Security Group 시각화 대시보드.
 ![Flask](https://img.shields.io/badge/Flask-3.0+-green)
 ![License](https://img.shields.io/badge/License-MIT-yellow)
 
+**한국어** | [English](README_EN.md)
+
 ## 주요 기능
 
 - **23개 AWS 리소스 타입 수집** — EC2, RDS, Aurora, ALB/NLB, Lambda, ECS, EKS, ElastiCache, Redshift, OpenSearch, DocumentDB, MSK, EMR, SageMaker, MWAA, DMS, EFS, DAX, Neptune, MemoryDB 등
