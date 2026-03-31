@@ -469,8 +469,8 @@ async function refreshGraph() {
     const risk = document.getElementById('riskFilter').value;
 
     let url = `/api/graph?hide_unused=${hideUnused}`;
-    if (acct) url += `&profile=${acct}`;
-    if (vpc) url += `&vpc=${vpc}`;
+    if (acct) url += `&profile=${encodeURIComponent(acct)}`;
+    if (vpc) url += `&vpc=${encodeURIComponent(vpc)}`;
     if (search) url += `&search=${encodeURIComponent(search)}`;
     if (risk) {
         if (risk === 'high') {
@@ -873,13 +873,13 @@ function renderGraph(graphData) {
     cy.on('mouseover', 'node', function(evt) {
         const d = evt.target.data();
         if (d.type === 'vpc') return;
-        let html = `<strong>${d.label}</strong><br>`;
+        let html = `<strong>${escHtml(d.label)}</strong><br>`;
         if (d.type === 'sg') {
-            html += `ID: ${d.id}<br>VPC: ${d.vpcId}<br>Resources: ${d.resourceCount}<br>`;
+            html += `ID: ${escHtml(d.id)}<br>VPC: ${escHtml(d.vpcId)}<br>Resources: ${d.resourceCount}<br>`;
             html += `Inbound: ${d.inboundCount} | Outbound: ${d.outboundCount}`;
-            if (d.profile) html += `<br>Profile: ${d.profile}`;
+            if (d.profile) html += `<br>Profile: ${escHtml(d.profile)}`;
         } else {
-            html += `Type: ${d.type}<br>ID: ${d.id}`;
+            html += `Type: ${escHtml(d.type)}<br>ID: ${escHtml(d.id)}`;
         }
         tooltip.innerHTML = html;
         tooltip.style.display = 'block';
@@ -920,21 +920,22 @@ async function showSgDetail(sgId) {
         if (!resp.ok) return;
         const sg = await resp.json();
 
-        document.getElementById('panelTitle').textContent = `${sg.name || sg.id}`;
+        document.getElementById('panelTitle').textContent = sg.name || sg.id;
 
         let html = '';
+        const E = escHtml;  // shorthand
 
         // Basic info
         html += `<div class="panel-section">
             <div class="panel-section-title">Security Group 정보</div>
-            <div class="detail-row"><span class="detail-label">ID</span><span class="detail-value">${sg.id}</span></div>
-            <div class="detail-row"><span class="detail-label">Name</span><span class="detail-value">${sg.name}</span></div>
-            <div class="detail-row"><span class="detail-label">VPC</span><span class="detail-value">${sg.vpc_id}</span></div>
-            ${sg.profile ? `<div class="detail-row"><span class="detail-label">Profile</span><span class="detail-value">${sg.profile}</span></div>` : ''}
-            ${sg.account_id ? `<div class="detail-row"><span class="detail-label">Account</span><span class="detail-value">${sg.account_id}</span></div>` : ''}
-            <div class="detail-row"><span class="detail-label">Description</span><span class="detail-value">${sg.description || '-'}</span></div>
+            <div class="detail-row"><span class="detail-label">ID</span><span class="detail-value">${E(sg.id)}</span></div>
+            <div class="detail-row"><span class="detail-label">Name</span><span class="detail-value">${E(sg.name)}</span></div>
+            <div class="detail-row"><span class="detail-label">VPC</span><span class="detail-value">${E(sg.vpc_id)}</span></div>
+            ${sg.profile ? `<div class="detail-row"><span class="detail-label">Profile</span><span class="detail-value">${E(sg.profile)}</span></div>` : ''}
+            ${sg.account_id ? `<div class="detail-row"><span class="detail-label">Account</span><span class="detail-value">${E(sg.account_id)}</span></div>` : ''}
+            <div class="detail-row"><span class="detail-label">Description</span><span class="detail-value">${E(sg.description || '-')}</span></div>
             <div class="detail-row"><span class="detail-label">Risk Level</span>
-                <span class="risk-badge ${sg.risk_level || 'low'}">${(sg.risk_level || 'low').toUpperCase()}</span>
+                <span class="risk-badge ${E(sg.risk_level || 'low')}">${E((sg.risk_level || 'low').toUpperCase())}</span>
             </div>
             <div class="detail-row"><span class="detail-label">Resources</span><span class="detail-value">${sg.resource_count}</span></div>
         </div>`;
@@ -946,12 +947,12 @@ async function showSgDetail(sgId) {
             for (const r of sg.risky_rules) {
                 html += `<div class="rule-card" style="border-color:#da3633;">
                     <div class="rule-header">
-                        <span class="rule-tag danger">${r.risk_level}</span>
-                        <span class="rule-tag protocol">${r.protocol}</span>
-                        <span class="rule-tag port">${r.port}</span>
-                        <span style="font-size:10px;color:#8b949e;">${r.direction}</span>
+                        <span class="rule-tag danger">${E(r.risk_level)}</span>
+                        <span class="rule-tag protocol">${E(r.protocol)}</span>
+                        <span class="rule-tag port">${E(r.port)}</span>
+                        <span style="font-size:10px;color:#8b949e;">${E(r.direction)}</span>
                     </div>
-                    <div class="rule-source">${r.source} — ${r.description}</div>
+                    <div class="rule-source">${E(r.source)} — ${E(r.description)}</div>
                 </div>`;
             }
             html += `</div>`;
@@ -966,12 +967,12 @@ async function showSgDetail(sgId) {
         for (const rule of sg.inbound_rules) {
             html += `<div class="rule-card">
                 <div class="rule-header">
-                    <span class="rule-tag protocol">${rule.protocol}</span>
-                    <span class="rule-tag port">${rule.port}</span>
+                    <span class="rule-tag protocol">${E(rule.protocol)}</span>
+                    <span class="rule-tag port">${E(rule.port)}</span>
                 </div>`;
             for (const src of rule.sources) {
                 const isDanger = src.value === '0.0.0.0/0' || src.value === '::/0';
-                html += `<div class="rule-source">${isDanger ? '⚠️ ' : ''}${src.value}${src.description ? ' — ' + src.description : ''}</div>`;
+                html += `<div class="rule-source">${isDanger ? '⚠️ ' : ''}${E(src.value)}${src.description ? ' — ' + E(src.description) : ''}</div>`;
             }
             html += '</div>';
         }
@@ -986,11 +987,11 @@ async function showSgDetail(sgId) {
         for (const rule of sg.outbound_rules) {
             html += `<div class="rule-card">
                 <div class="rule-header">
-                    <span class="rule-tag protocol">${rule.protocol}</span>
-                    <span class="rule-tag port">${rule.port}</span>
+                    <span class="rule-tag protocol">${E(rule.protocol)}</span>
+                    <span class="rule-tag port">${E(rule.port)}</span>
                 </div>`;
             for (const src of rule.sources) {
-                html += `<div class="rule-source">${src.value}${src.description ? ' — ' + src.description : ''}</div>`;
+                html += `<div class="rule-source">${E(src.value)}${src.description ? ' — ' + E(src.description) : ''}</div>`;
             }
             html += '</div>';
         }
@@ -1003,10 +1004,10 @@ async function showSgDetail(sgId) {
             html += '<div style="font-size:11px;color:#6e7681;">연결된 리소스가 없습니다. (미사용 SG)</div>';
         }
         for (const res of sg.resources) {
-            const typeClass = res.type.toLowerCase().replace('/', '');
+            const typeClass = res.type.toLowerCase().replace(/[^a-z]/g, '');
             html += `<div class="resource-item">
-                <span class="resource-badge ${typeClass}">${res.type}</span>
-                <span>${res.name || res.id}</span>
+                <span class="resource-badge ${typeClass}">${E(res.type)}</span>
+                <span>${E(res.name || res.id)}</span>
             </div>`;
         }
         html += '</div>';
@@ -1016,9 +1017,10 @@ async function showSgDetail(sgId) {
             html += `<div class="panel-section">
                 <div class="panel-section-title">SG 간 참조</div>`;
             for (const ref of sg.sg_references) {
-                html += `<div class="resource-item" onclick="showSgDetail('${ref}')" style="cursor:pointer;">
+                const safeRef = ref.replace(/[^a-z0-9-]/gi, '');
+                html += `<div class="resource-item" onclick="showSgDetail('${safeRef}')" style="cursor:pointer;">
                     <span class="resource-badge" style="background:#58a6ff30;color:#58a6ff;">SG</span>
-                    <span>${ref}</span>
+                    <span>${E(ref)}</span>
                 </div>`;
             }
             html += '</div>';
@@ -1214,8 +1216,8 @@ async function renderTable() {
 
     // Use graph API to get filtered SG list
     let url = `/api/graph?hide_unused=${hideUnused}`;
-    if (acct) url += `&profile=${acct}`;
-    if (vpc) url += `&vpc=${vpc}`;
+    if (acct) url += `&profile=${encodeURIComponent(acct)}`;
+    if (vpc) url += `&vpc=${encodeURIComponent(vpc)}`;
     if (search) url += `&search=${encodeURIComponent(search)}`;
     if (risk) url += `&risk=${risk === 'high' ? 'high' : risk}`;
 

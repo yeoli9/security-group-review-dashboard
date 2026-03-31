@@ -93,15 +93,19 @@ def collect_lambda_functions(session):
 def collect_ecs_services(session):
     ecs = session.client("ecs")
     services = []
-    clusters = ecs.list_clusters()["clusterArns"]
-    for cluster in clusters:
-        paginator = ecs.get_paginator("list_services")
-        for page in paginator.paginate(cluster=cluster):
-            if page["serviceArns"]:
-                descs = ecs.describe_services(
-                    cluster=cluster, services=page["serviceArns"]
-                )["services"]
-                services.extend(descs)
+    cluster_paginator = ecs.get_paginator("list_clusters")
+    for cluster_page in cluster_paginator.paginate():
+        for cluster in cluster_page["clusterArns"]:
+            svc_paginator = ecs.get_paginator("list_services")
+            for page in svc_paginator.paginate(cluster=cluster):
+                arns = page.get("serviceArns", [])
+                # describe_services accepts max 10 at a time
+                for i in range(0, len(arns), 10):
+                    batch = arns[i:i+10]
+                    descs = ecs.describe_services(
+                        cluster=cluster, services=batch
+                    )["services"]
+                    services.extend(descs)
     return services
 
 
@@ -661,9 +665,11 @@ def collect_all(profile_name=None, region_name=None):
     errors = []
 
     # Parallel collection using ThreadPoolExecutor
+    # Each thread creates its own session for thread safety
     def _run_task(key, name, func):
         try:
-            data = func(session)
+            thread_session = get_session(profile_name, region_name)
+            data = func(thread_session)
             print(f"  ✓ {name}: {len(data)}")
             return key, data, None
         except Exception as e:

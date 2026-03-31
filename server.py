@@ -388,10 +388,13 @@ def api_export_unused():
             unused.append(entry)
 
     if fmt == "csv":
-        lines = ["profile,account_id,sg_id,sg_name,vpc_id,description,inbound_count,outbound_count"]
+        import csv, io
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["profile", "account_id", "sg_id", "sg_name", "vpc_id", "description", "inbound_count", "outbound_count"])
         for u in unused:
-            lines.append(f"{u['profile']},{u['account_id']},{u['sg_id']},{u['sg_name']},{u['vpc_id']},\"{u['description']}\",{u['inbound_count']},{u['outbound_count']}")
-        return "\n".join(lines), 200, {"Content-Type": "text/csv", "Content-Disposition": "attachment; filename=unused_sgs.csv"}
+            writer.writerow([u["profile"], u["account_id"], u["sg_id"], u["sg_name"], u["vpc_id"], u["description"], u["inbound_count"], u["outbound_count"]])
+        return output.getvalue(), 200, {"Content-Type": "text/csv", "Content-Disposition": "attachment; filename=unused_sgs.csv"}
     return jsonify(unused)
 
 
