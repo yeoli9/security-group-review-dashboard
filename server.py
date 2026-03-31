@@ -249,7 +249,9 @@ def api_graph():
                 continue
             elif risk_filter == "high" and node_class not in ("critical", "high"):
                 continue
-            elif risk_filter not in ("used", "high") and risk_filter != node_class:
+            elif risk_filter == "circular" and not sg.get("in_circular_ref", False):
+                continue
+            elif risk_filter not in ("used", "high", "circular") and risk_filter != node_class:
                 continue
 
         sg_ids_in_graph.add(sg["id"])
@@ -267,6 +269,7 @@ def api_graph():
                 "vpcId": sg["vpc_id"],
                 "profile": sg.get("_profile", ""),
                 "description": sg.get("description", ""),
+                "inCircularRef": sg.get("in_circular_ref", False),
             }
         })
 
@@ -326,13 +329,13 @@ def api_graph():
     sg_nodes = [n for n in unique_nodes if n["data"].get("type") == "sg"]
     risky_sgs = [n for n in sg_nodes if n["data"].get("nodeClass") in ("high", "critical")]
     unused_sgs = [n for n in sg_nodes if n["data"].get("nodeClass") == "unused"]
-    medium_sgs = [n for n in sg_nodes if n["data"].get("nodeClass") == "medium"]
+    circular_sgs = [n for n in sg_nodes if n["data"].get("inCircularRef")]
     stats = {
         "total_sgs": len(sg_nodes),
         "used_sgs": len(sg_nodes) - len(unused_sgs),
         "unused_sgs": len(unused_sgs),
         "risky_sgs": len(risky_sgs),
-        "circular_sgs": len(medium_sgs),
+        "circular_sgs": len(circular_sgs),
     }
 
     # Count default SG warnings from filtered accounts
