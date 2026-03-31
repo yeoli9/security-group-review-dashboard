@@ -1,5 +1,7 @@
 """Flask server for Security Group Review Dashboard."""
 
+__version__ = "1.0.0"
+
 import configparser
 import json
 import os
@@ -472,4 +474,5 @@ def _load_cache():
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5000
     print(f"Starting SG Review Dashboard on http://localhost:{port}")
-    app.run(host="0.0.0.0", port=port, debug=True)
+    debug = os.getenv("FLASK_DEBUG", "0") == "1"
+    app.run(host="0.0.0.0", port=port, debug=debug)

@@ -1,0 +1,14 @@
+.git
+.gitignore
+.venv
+venv
+__pycache__
+*.pyc
+sg_data_cache.json
+docs/
+*.md
+!requirements.txt
+LICENSE
+.idea
+.vscode
+.env
