@@ -134,7 +134,14 @@ def api_collect():
             findings = analyze(data)
             data["profile"] = profile_key
             _accounts[profile_key] = {"data": data, "findings": findings}
-            results.append({"account_id": data["account_id"], "profile": profile_key, "status": "ok", "summary": findings["summary"]})
+            collection_errors = data.get("collection_errors", [])
+            results.append({
+                "account_id": data["account_id"],
+                "profile": profile_key,
+                "status": "ok",
+                "summary": findings["summary"],
+                "collection_errors": collection_errors,
+            })
         except Exception as e:
             results.append({"profile": profile_key, "status": "error", "message": str(e)})
 

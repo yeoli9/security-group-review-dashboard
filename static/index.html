@@ -1113,13 +1113,19 @@ async function collectData() {
             const skipped = result.skipped || [];
             hideLoading();
             let msg = `수집 완료: ${successes.length}개 프로필`;
+            // Show per-service collection errors
+            const allCollectionErrors = successes.flatMap(s => s.collection_errors || []);
+            if (allCollectionErrors.length > 0) {
+                msg += `\n\n⚠️ 일부 서비스 수집 실패 (${allCollectionErrors.length}개):\n` +
+                    allCollectionErrors.map(e => `  ✗ ${e.service}: ${e.error}`).join('\n');
+            }
             if (skipped.length > 0) {
                 msg += `\n\n중복 계정 스킵 (${skipped.length}개):\n` + skipped.map(s => `  ${s.profile} → ${s.account_id}`).join('\n');
             }
             if (failures.length > 0) {
-                msg += `\n\n실패 (${failures.length}개):\n` + failures.map(f => `  ${f.profile}: ${f.message}`).join('\n');
+                msg += `\n\n프로필 실패 (${failures.length}개):\n` + failures.map(f => `  ${f.profile}: ${f.message}`).join('\n');
             }
-            if (skipped.length > 0 || failures.length > 0) {
+            if (allCollectionErrors.length > 0 || skipped.length > 0 || failures.length > 0) {
                 alert(msg);
             }
             await loadCachedData();

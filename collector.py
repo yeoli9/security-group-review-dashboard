@@ -1,7 +1,9 @@
 """AWS Security Group data collector using boto3."""
 
 import boto3
+import traceback
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 def get_session(profile_name=None, region_name=None):
@@ -63,10 +65,11 @@ def collect_load_balancers(session):
 
 def collect_classic_lbs(session):
     elb = session.client("elb")
-    try:
-        return elb.describe_load_balancers()["LoadBalancerDescriptions"]
-    except Exception:
-        return []
+    lbs = []
+    paginator = elb.get_paginator("describe_load_balancers")
+    for page in paginator.paginate():
+        lbs.extend(page["LoadBalancerDescriptions"])
+    return lbs
 
 
 def collect_vpc_endpoints(session):
@@ -173,12 +176,10 @@ def collect_msk_clusters(session):
         for page in paginator.paginate():
             clusters.extend(page.get("ClusterInfoList", []))
     except Exception:
-        try:
-            paginator = kafka.get_paginator("list_clusters")
-            for page in paginator.paginate():
-                clusters.extend(page.get("ClusterInfoList", []))
-        except Exception:
-            pass
+        # Fallback to v1 API
+        paginator = kafka.get_paginator("list_clusters")
+        for page in paginator.paginate():
+            clusters.extend(page.get("ClusterInfoList", []))
     return clusters
 
 
@@ -209,14 +210,11 @@ def collect_sagemaker_notebooks(session):
 def collect_mwaa_environments(session):
     mwaa = session.client("mwaa")
     envs = []
-    try:
-        paginator = mwaa.get_paginator("list_environments")
-        for page in paginator.paginate():
-            for name in page.get("Environments", []):
-                detail = mwaa.get_environment(Name=name)["Environment"]
-                envs.append(detail)
-    except Exception:
-        pass
+    paginator = mwaa.get_paginator("list_environments")
+    for page in paginator.paginate():
+        for name in page.get("Environments", []):
+            detail = mwaa.get_environment(Name=name)["Environment"]
+            envs.append(detail)
     return envs
 
 
@@ -250,11 +248,16 @@ def collect_efs_mount_targets(session):
 def collect_dax_clusters(session):
     dax = session.client("dax")
     clusters = []
-    try:
-        resp = dax.describe_clusters()
+    next_token = None
+    while True:
+        kwargs = {}
+        if next_token:
+            kwargs["NextToken"] = next_token
+        resp = dax.describe_clusters(**kwargs)
         clusters.extend(resp.get("Clusters", []))
-    except Exception:
-        pass
+        next_token = resp.get("NextToken")
+        if not next_token:
+            break
     return clusters
 
 
@@ -270,17 +273,26 @@ def collect_neptune_clusters(session):
 def collect_memorydb_clusters(session):
     mdb = session.client("memorydb")
     clusters = []
-    try:
-        resp = mdb.describe_clusters()
+    next_token = None
+    while True:
+        kwargs = {}
+        if next_token:
+            kwargs["NextToken"] = next_token
+        resp = mdb.describe_clusters(**kwargs)
         clusters.extend(resp.get("Clusters", []))
-    except Exception:
-        pass
+        next_token = resp.get("NextToken")
+        if not next_token:
+            break
     return clusters
 
 
 def collect_vpcs(session):
     ec2 = session.client("ec2")
-    return ec2.describe_vpcs()["Vpcs"]
+    vpcs = []
+    paginator = ec2.get_paginator("describe_vpcs")
+    for page in paginator.paginate():
+        vpcs.extend(page["Vpcs"])
+    return vpcs
 
 
 def get_name_tag(tags):
@@ -604,136 +616,108 @@ def build_sg_resource_map(
 
 
 def collect_all(profile_name=None, region_name=None):
-    """Collect all data and return structured result."""
+    """Collect all data and return structured result.
+
+    Uses parallel collection for performance and tracks errors per service.
+    """
+    import datetime
+
     session = get_session(profile_name, region_name)
     region = session.region_name or "ap-northeast-2"
     account_id = session.client("sts").get_caller_identity()["Account"]
 
     print(f"Collecting data for account {account_id}, region {region}...")
 
-    print("  - Security Groups...")
-    sgs = collect_security_groups(session)
-    print(f"    Found {len(sgs)} security groups")
+    # Define all collection tasks: (key, display_name, collect_function)
+    tasks = [
+        ("security_groups", "Security Groups", collect_security_groups),
+        ("vpcs", "VPCs", collect_vpcs),
+        ("enis", "ENIs", collect_enis),
+        ("ec2_instances", "EC2 Instances", collect_ec2_instances),
+        ("rds_instances", "RDS Instances", collect_rds_instances),
+        ("load_balancers", "ALB/NLB", collect_load_balancers),
+        ("classic_lbs", "Classic LB", collect_classic_lbs),
+        ("vpc_endpoints", "VPC Endpoints", collect_vpc_endpoints),
+        ("lambda_functions", "Lambda Functions", collect_lambda_functions),
+        ("ecs_services", "ECS Services", collect_ecs_services),
+        ("rds_clusters", "RDS/Aurora Clusters", collect_rds_clusters),
+        ("elasticache_clusters", "ElastiCache", collect_elasticache_clusters),
+        ("redshift_clusters", "Redshift", collect_redshift_clusters),
+        ("opensearch_domains", "OpenSearch", collect_opensearch_domains),
+        ("eks_clusters", "EKS", collect_eks_clusters),
+        ("documentdb_clusters", "DocumentDB", collect_documentdb_clusters),
+        ("msk_clusters", "MSK (Kafka)", collect_msk_clusters),
+        ("emr_clusters", "EMR", collect_emr_clusters),
+        ("sagemaker_notebooks", "SageMaker", collect_sagemaker_notebooks),
+        ("mwaa_environments", "MWAA (Airflow)", collect_mwaa_environments),
+        ("dms_instances", "DMS", collect_dms_instances),
+        ("efs_mount_targets", "EFS", collect_efs_mount_targets),
+        ("dax_clusters", "DAX", collect_dax_clusters),
+        ("neptune_clusters", "Neptune", collect_neptune_clusters),
+        ("memorydb_clusters", "MemoryDB", collect_memorydb_clusters),
+    ]
 
-    print("  - VPCs...")
-    vpcs = collect_vpcs(session)
+    results = {}
+    errors = []
 
-    print("  - ENIs...")
-    enis = collect_enis(session)
-    print(f"    Found {len(enis)} ENIs")
+    # Parallel collection using ThreadPoolExecutor
+    def _run_task(key, name, func):
+        try:
+            data = func(session)
+            print(f"  ✓ {name}: {len(data)}")
+            return key, data, None
+        except Exception as e:
+            err_msg = str(e)
+            # Truncate long error messages
+            if len(err_msg) > 200:
+                err_msg = err_msg[:200] + "..."
+            print(f"  ✗ {name}: {err_msg}")
+            return key, [], {"service": name, "error": err_msg}
 
-    print("  - EC2 Instances...")
-    ec2_instances = collect_ec2_instances(session)
-    print(f"    Found {len(ec2_instances)} instances")
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {
+            executor.submit(_run_task, key, name, func): key
+            for key, name, func in tasks
+        }
+        for future in as_completed(futures):
+            key, data, error = future.result()
+            results[key] = data
+            if error:
+                errors.append(error)
 
-    print("  - RDS Instances...")
-    rds_instances = collect_rds_instances(session)
-    print(f"    Found {len(rds_instances)} RDS instances")
-
-    print("  - Load Balancers (ALB/NLB)...")
-    load_balancers = collect_load_balancers(session)
-    print(f"    Found {len(load_balancers)} ALB/NLB")
-
-    print("  - Classic Load Balancers...")
-    classic_lbs = collect_classic_lbs(session)
-    print(f"    Found {len(classic_lbs)} CLB")
-
-    print("  - VPC Endpoints...")
-    vpc_endpoints = collect_vpc_endpoints(session)
-    print(f"    Found {len(vpc_endpoints)} VPC endpoints")
-
-    print("  - Lambda Functions...")
-    lambda_functions = collect_lambda_functions(session)
-    print(f"    Found {len(lambda_functions)} Lambda functions")
-
-    print("  - ECS Services...")
-    ecs_services = collect_ecs_services(session)
-    print(f"    Found {len(ecs_services)} ECS services")
-
-    print("  - RDS/Aurora Clusters...")
-    rds_clusters = collect_rds_clusters(session)
-    print(f"    Found {len(rds_clusters)} RDS clusters")
-
-    print("  - ElastiCache...")
-    elasticache_clusters = collect_elasticache_clusters(session)
-    print(f"    Found {len(elasticache_clusters)} ElastiCache clusters")
-
-    print("  - Redshift...")
-    redshift_clusters = collect_redshift_clusters(session)
-    print(f"    Found {len(redshift_clusters)} Redshift clusters")
-
-    print("  - OpenSearch...")
-    opensearch_domains = collect_opensearch_domains(session)
-    print(f"    Found {len(opensearch_domains)} OpenSearch domains")
-
-    print("  - EKS...")
-    eks_clusters = collect_eks_clusters(session)
-    print(f"    Found {len(eks_clusters)} EKS clusters")
-
-    print("  - DocumentDB...")
-    documentdb_clusters = collect_documentdb_clusters(session)
-    print(f"    Found {len(documentdb_clusters)} DocumentDB clusters")
-
-    print("  - MSK (Kafka)...")
-    msk_clusters = collect_msk_clusters(session)
-    print(f"    Found {len(msk_clusters)} MSK clusters")
-
-    print("  - EMR...")
-    emr_clusters = collect_emr_clusters(session)
-    print(f"    Found {len(emr_clusters)} EMR clusters")
-
-    print("  - SageMaker Notebooks...")
-    sagemaker_notebooks = collect_sagemaker_notebooks(session)
-    print(f"    Found {len(sagemaker_notebooks)} SageMaker notebooks")
-
-    print("  - MWAA (Airflow)...")
-    mwaa_environments = collect_mwaa_environments(session)
-    print(f"    Found {len(mwaa_environments)} MWAA environments")
-
-    print("  - DMS...")
-    dms_instances = collect_dms_instances(session)
-    print(f"    Found {len(dms_instances)} DMS instances")
-
-    print("  - EFS...")
-    efs_mount_targets = collect_efs_mount_targets(session)
-    print(f"    Found {len(efs_mount_targets)} EFS mount targets")
-
-    print("  - DAX...")
-    dax_clusters = collect_dax_clusters(session)
-    print(f"    Found {len(dax_clusters)} DAX clusters")
-
-    print("  - Neptune...")
-    neptune_clusters = collect_neptune_clusters(session)
-    print(f"    Found {len(neptune_clusters)} Neptune clusters")
-
-    print("  - MemoryDB...")
-    memorydb_clusters = collect_memorydb_clusters(session)
-    print(f"    Found {len(memorydb_clusters)} MemoryDB clusters")
+    sgs = results["security_groups"]
+    vpcs_raw = results["vpcs"]
 
     # Build resource map
     sg_resource_map = build_sg_resource_map(
-        enis, ec2_instances, rds_instances, load_balancers, classic_lbs,
-        vpc_endpoints, lambda_functions, ecs_services,
-        rds_clusters=rds_clusters,
-        elasticache_clusters=elasticache_clusters,
-        redshift_clusters=redshift_clusters,
-        opensearch_domains=opensearch_domains,
-        eks_clusters=eks_clusters,
-        documentdb_clusters=documentdb_clusters,
-        msk_clusters=msk_clusters,
-        emr_clusters=emr_clusters,
-        sagemaker_notebooks=sagemaker_notebooks,
-        mwaa_environments=mwaa_environments,
-        dms_instances=dms_instances,
-        efs_mount_targets=efs_mount_targets,
-        dax_clusters=dax_clusters,
-        neptune_clusters=neptune_clusters,
-        memorydb_clusters=memorydb_clusters,
+        results["enis"],
+        results["ec2_instances"],
+        results["rds_instances"],
+        results["load_balancers"],
+        results["classic_lbs"],
+        results["vpc_endpoints"],
+        results["lambda_functions"],
+        results["ecs_services"],
+        rds_clusters=results["rds_clusters"],
+        elasticache_clusters=results["elasticache_clusters"],
+        redshift_clusters=results["redshift_clusters"],
+        opensearch_domains=results["opensearch_domains"],
+        eks_clusters=results["eks_clusters"],
+        documentdb_clusters=results["documentdb_clusters"],
+        msk_clusters=results["msk_clusters"],
+        emr_clusters=results["emr_clusters"],
+        sagemaker_notebooks=results["sagemaker_notebooks"],
+        mwaa_environments=results["mwaa_environments"],
+        dms_instances=results["dms_instances"],
+        efs_mount_targets=results["efs_mount_targets"],
+        dax_clusters=results["dax_clusters"],
+        neptune_clusters=results["neptune_clusters"],
+        memorydb_clusters=results["memorydb_clusters"],
     )
 
     # Build VPC map
     vpc_map = {}
-    for vpc in vpcs:
+    for vpc in vpcs_raw:
         vpc_id = vpc["VpcId"]
         vpc_map[vpc_id] = {
             "id": vpc_id,
@@ -770,12 +754,15 @@ def collect_all(profile_name=None, region_name=None):
             "sg_references": list(sg_refs),
         })
 
+    print(f"Collection complete: {len(sgs)} SGs, {len(errors)} errors")
+
     return {
         "account_id": account_id,
         "region": region,
         "vpcs": vpc_map,
         "security_groups": sg_data,
-        "collection_time": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+        "collection_time": datetime.datetime.utcnow().isoformat() + "Z",
+        "collection_errors": errors,
     }
 
 
