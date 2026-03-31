@@ -1132,10 +1132,14 @@ async function collectData() {
             const skipped = result.skipped || [];
             hideLoading();
             let msg = `수집 완료: ${successes.length}개 프로필`;
-            // Show per-service collection errors
+            // Show skipped services (no permission) and real errors separately
+            const allSkippedServices = successes.flatMap(s => s.skipped_services || []);
+            if (allSkippedServices.length > 0) {
+                msg += `\n\n💤 권한 없어 건너뜀 (${allSkippedServices.length}개): ${allSkippedServices.join(', ')}`;
+            }
             const allCollectionErrors = successes.flatMap(s => s.collection_errors || []);
             if (allCollectionErrors.length > 0) {
-                msg += `\n\n⚠️ 일부 서비스 수집 실패 (${allCollectionErrors.length}개):\n` +
+                msg += `\n\n⚠️ 수집 실패 (${allCollectionErrors.length}개):\n` +
                     allCollectionErrors.map(e => `  ✗ ${e.service}: ${e.error}`).join('\n');
             }
             if (skipped.length > 0) {

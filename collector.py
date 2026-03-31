@@ -677,6 +677,11 @@ def collect_all(profile_name=None, region_name=None):
             # Truncate long error messages
             if len(err_msg) > 200:
                 err_msg = err_msg[:200] + "..."
+            # Classify access denied as skipped, not error
+            access_denied = any(k in err_msg for k in ("AccessDenied", "UnauthorizedOperation", "Access Denied"))
+            if access_denied:
+                print(f"  - {name}: skipped (no permission)")
+                return key, [], {"service": name, "error": err_msg, "skipped": True}
             print(f"  ✗ {name}: {err_msg}")
             return key, [], {"service": name, "error": err_msg}
 

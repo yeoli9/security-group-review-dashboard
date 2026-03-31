@@ -136,13 +136,16 @@ def api_collect():
             findings = analyze(data)
             data["profile"] = profile_key
             _accounts[profile_key] = {"data": data, "findings": findings}
-            collection_errors = data.get("collection_errors", [])
+            all_errors = data.get("collection_errors", [])
+            collection_errors = [e for e in all_errors if not e.get("skipped")]
+            collection_skipped = [e["service"] for e in all_errors if e.get("skipped")]
             results.append({
                 "account_id": data["account_id"],
                 "profile": profile_key,
                 "status": "ok",
                 "summary": findings["summary"],
                 "collection_errors": collection_errors,
+                "skipped_services": collection_skipped,
             })
         except Exception as e:
             results.append({"profile": profile_key, "status": "error", "message": str(e)})
