@@ -234,6 +234,7 @@
         <label>Risk</label>
         <select id="riskFilter" style="max-width:100px;" onchange="refreshGraph()">
             <option value="">All</option>
+            <option value="used">Used (All)</option>
             <option value="high">Critical/High</option>
             <option value="medium">Medium</option>
             <option value="low">Low</option>
@@ -255,7 +256,7 @@
 <!-- Stats Bar -->
 <div class="stats-bar" id="statsBar">
     <div class="stat-chip total" onclick="setRiskFilter('')">Total SG: <span class="num" id="statTotal">-</span></div>
-    <div class="stat-chip used" onclick="setRiskFilter('low')">Used: <span class="num" id="statUsed">-</span></div>
+    <div class="stat-chip used" onclick="setRiskFilter('used')">Used: <span class="num" id="statUsed">-</span></div>
     <div class="stat-chip unused" onclick="setRiskFilter('unused')">Unused: <span class="num" id="statUnused">-</span></div>
     <div class="stat-chip critical" onclick="setRiskFilter('high')">Risky: <span class="num" id="statRisky">-</span></div>
     <div class="stat-chip circular">Circular: <span class="num" id="statCircular">-</span></div>

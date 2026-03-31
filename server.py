@@ -243,11 +243,13 @@ def api_graph():
         if not sg["is_used"]:
             node_class = "unused"
 
-        # Risk filter: "high" includes both critical and high
+        # Risk filter
         if risk_filter:
-            if risk_filter == "high" and node_class not in ("critical", "high"):
+            if risk_filter == "used" and node_class == "unused":
                 continue
-            elif risk_filter != "high" and risk_filter != node_class:
+            elif risk_filter == "high" and node_class not in ("critical", "high"):
+                continue
+            elif risk_filter not in ("used", "high") and risk_filter != node_class:
                 continue
 
         sg_ids_in_graph.add(sg["id"])
