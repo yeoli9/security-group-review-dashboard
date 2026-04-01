@@ -10,10 +10,14 @@ def analyze(data, governance_config=None):
 
     governance_warnings = find_governance_warnings(sgs, governance_config) if governance_config else []
 
+    risky_rules = find_risky_rules(sgs)
+    transitive = find_transitive_exposure(sgs, sg_map)
+    risky_rules.extend(transitive)
+
     findings = {
         "unused_sgs": find_unused_sgs(sgs),
         "default_sg_warnings": find_default_sg_warnings(sgs),
-        "risky_rules": find_risky_rules(sgs),
+        "risky_rules": risky_rules,
         "circular_references": find_circular_references(sgs, sg_map),
         "redundant_rules": find_redundant_rules(sgs),
         "governance_warnings": governance_warnings,
@@ -179,6 +183,43 @@ def _assess_rule_risk(rule, source, direction):
             pass
 
     return None
+
+
+def find_transitive_exposure(sgs, sg_map):
+    """Find SGs that are transitively exposed to the internet.
+
+    If SG-A references SG-B in its inbound rules, and SG-B has 0.0.0.0/0 or ::/0
+    inbound, then SG-A is indirectly exposed via SG-B.
+    """
+    internet_sgs = set()
+    for sg in sgs:
+        for rule in sg["inbound_rules"]:
+            for source in rule["sources"]:
+                if source["value"] in ("0.0.0.0/0", "::/0"):
+                    internet_sgs.add(sg["id"])
+                    break
+
+    transitive = []
+    for sg in sgs:
+        if sg["id"] in internet_sgs:
+            continue
+        for rule in sg["inbound_rules"]:
+            for source in rule["sources"]:
+                if source["type"] == "sg" and source["value"] in internet_sgs:
+                    ref_sg = sg_map.get(source["value"])
+                    ref_name = ref_sg["name"] if ref_sg else source["value"]
+                    transitive.append({
+                        "sg_id": sg["id"],
+                        "sg_name": sg["name"],
+                        "direction": "inbound",
+                        "protocol": rule["protocol"],
+                        "port": rule["port"],
+                        "source": source["value"],
+                        "risk_type": "transitive_exposure",
+                        "risk_level": "high",
+                        "description": f"Transitively exposed via internet-facing SG {ref_name} ({source['value']})",
+                    })
+    return transitive
 
 
 def find_circular_references(sgs, sg_map):

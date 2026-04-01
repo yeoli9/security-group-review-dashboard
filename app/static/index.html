@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Security Group Review Dashboard</title>
-    <script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+    <script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js" integrity="sha384-J7Q85oZE4GJ/e7+n2aOQsLXfDwwfnA8S2nZAL5BpFsfpCF84zQD7LroZ/dMnLgex" crossorigin="anonymous"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f1117; color: #e1e4e8; overflow: hidden; height: 100vh; }
@@ -253,8 +253,10 @@
             <button class="btn" id="btnTableView" onclick="switchView('table')">Table</button>
         </div>
         <button class="btn btn-primary" onclick="showCollectModal()">Collect</button>
-        <button class="btn" onclick="exportUnused('json')">JSON</button>
-        <button class="btn" onclick="exportUnused('csv')">CSV</button>
+        <button class="btn" onclick="exportUnused('csv')" title="Unused SGs CSV">CSV</button>
+        <button class="btn" onclick="exportUnused('xlsx')" title="Unused SGs XLSX">XLSX</button>
+        <button class="btn" style="background:#da363320;color:#f85149;border-color:#da363340;" onclick="exportRisky('csv')" title="Risky Rules CSV">Risky CSV</button>
+        <button class="btn" style="background:#da363320;color:#f85149;border-color:#da363340;" onclick="exportRisky('xlsx')" title="Risky Rules XLSX">Risky XLSX</button>
     </div>
 </div>
 
@@ -1345,7 +1347,14 @@ function hideLoading() {
 function exportUnused(fmt) {
     const acct = document.getElementById('profileFilter').value;
     let url = `/api/export/unused?format=${fmt}`;
-    if (acct) url += `&profile=${acct}`;
+    if (acct) url += `&profile=${encodeURIComponent(acct)}`;
+    window.open(url, '_blank');
+}
+
+function exportRisky(fmt) {
+    const acct = document.getElementById('profileFilter').value;
+    let url = `/api/export/risky?format=${fmt}`;
+    if (acct) url += `&profile=${encodeURIComponent(acct)}`;
     window.open(url, '_blank');
 }
 
@@ -1474,6 +1483,20 @@ function sortTable(col) {
     }
     renderTable();
 }
+
+// Keyboard shortcuts
+document.addEventListener('keydown', function(e) {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+    if (e.key === '/') {
+        e.preventDefault();
+        document.getElementById('searchInput').focus();
+    } else if (e.key === 'f') {
+        if (cy) cy.fit(undefined, 50);
+    } else if (e.key === 'Escape') {
+        closePanel();
+        closeCollectModal();
+    }
+});
 </script>
 </body>
 </html>

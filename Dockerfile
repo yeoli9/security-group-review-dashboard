@@ -9,4 +9,4 @@ COPY . .
 
 EXPOSE 5000
 
-CMD ["python", "app/server.py"]
+ENTRYPOINT ["python", "app/server.py", "--host", "0.0.0.0"]

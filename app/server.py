@@ -18,6 +18,7 @@ _APP_DIR = Path(__file__).parent
 _PROJECT_DIR = _APP_DIR.parent
 
 app = Flask(__name__, static_folder=str(_APP_DIR / "static"))
+app.json.ensure_ascii = False
 CORS(app)
 
 # Multi-account cache: { account_id: { data, findings } }
@@ -433,9 +434,8 @@ def api_export_unused():
         if acct_filter and profile_key != acct_filter:
             continue
         for u in acct["findings"].get("unused_sgs", []):
-            entry = dict(u)
-            entry["profile"] = profile_key
-            entry["account_id"] = acct["data"].get("account_id", "")
+            entry = {"profile": profile_key, "account_id": acct["data"].get("account_id", "")}
+            entry.update(u)
             unused.append(entry)
 
     if fmt == "csv":
@@ -446,7 +446,81 @@ def api_export_unused():
         for u in unused:
             writer.writerow([u["profile"], u["account_id"], u["sg_id"], u["sg_name"], u["vpc_id"], u["description"], u["inbound_count"], u["outbound_count"]])
         return output.getvalue(), 200, {"Content-Type": "text/csv", "Content-Disposition": "attachment; filename=unused_sgs.csv"}
+
+    if fmt == "xlsx":
+        return _export_xlsx(unused, "unused_sgs")
+
     return jsonify(unused)
+
+
+@app.route("/api/export/risky")
+def api_export_risky():
+    """Export risky SG rules as JSON/CSV/XLSX."""
+    if not _accounts:
+        _load_cache()
+    if not _accounts:
+        return jsonify([])
+
+    acct_filter = request.args.get("profile")
+    fmt = request.args.get("format", "json")
+
+    risky = []
+    for profile_key, acct in _accounts.items():
+        if acct_filter and profile_key != acct_filter:
+            continue
+        for r in acct["findings"].get("risky_rules", []):
+            entry = {"profile": profile_key, "account_id": acct["data"].get("account_id", "")}
+            entry.update(r)
+            risky.append(entry)
+
+    if fmt == "csv":
+        import csv, io
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["profile", "account_id", "sg_id", "sg_name", "direction", "protocol", "port", "source", "risk_type", "risk_level", "description"])
+        for r in risky:
+            writer.writerow([r["profile"], r["account_id"], r["sg_id"], r["sg_name"], r["direction"], r["protocol"], r["port"], r["source"], r["risk_type"], r["risk_level"], r["description"]])
+        return output.getvalue(), 200, {"Content-Type": "text/csv", "Content-Disposition": "attachment; filename=risky_rules.csv"}
+
+    if fmt == "xlsx":
+        return _export_xlsx(risky, "risky_rules")
+
+    return jsonify(risky)
+
+
+def _export_xlsx(rows, filename):
+    """Export a list of dicts as an XLSX file."""
+    import io
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = filename
+
+    if not rows:
+        ws.append(["No data"])
+    else:
+        headers = list(rows[0].keys())
+        header_font = Font(bold=True, color="FFFFFF")
+        header_fill = PatternFill(start_color="1F6FEB", end_color="1F6FEB", fill_type="solid")
+        for col_idx, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col_idx, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+        for row in rows:
+            ws.append([row.get(h, "") for h in headers])
+        for col in ws.columns:
+            max_len = max((len(str(cell.value or "")) for cell in col), default=10)
+            ws.column_dimensions[col[0].column_letter].width = min(max_len + 2, 50)
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output.getvalue(), 200, {
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": f"attachment; filename={filename}.xlsx",
+    }
 
 
 def _merge_data(acct_filter=None):
@@ -523,7 +597,17 @@ def _load_cache():
 
 
 if __name__ == "__main__":
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 5000
+    import argparse
+    parser = argparse.ArgumentParser(description="Security Group Review Dashboard")
+    parser.add_argument("port_positional", nargs="?", type=int, default=None,
+                        help="Server port (positional, for backward compat)")
+    parser.add_argument("--port", "-p", type=int, default=5000, help="Server port (default: 5000)")
+    parser.add_argument("--host", default="0.0.0.0", help="Server host (default: 0.0.0.0)")
+    parser.add_argument("--cache-file", default=str(_PROJECT_DIR / "sg_data_cache.json"), help="Cache file path")
+    parser.add_argument("--no-debug", action="store_true", help="Disable debug mode")
+    args = parser.parse_args()
+
+    port = args.port_positional if args.port_positional is not None else args.port
+    CACHE_FILE = args.cache_file
     print(f"Starting SG Review Dashboard on http://localhost:{port}")
-    debug = os.getenv("FLASK_DEBUG", "0") == "1"
-    app.run(host="0.0.0.0", port=port, debug=debug)
+    app.run(host=args.host, port=port, debug=not args.no_debug)
